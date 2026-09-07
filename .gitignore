@@ -27,5 +27,6 @@ initramfs*
 # Local build output and editor metadata.
 build/
 dist/
+release/
 .DS_Store
 ._*

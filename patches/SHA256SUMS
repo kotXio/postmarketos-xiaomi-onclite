@@ -1,0 +1,14 @@
+ed9bba0b621257ce3a649373c5f781f321708867dbd0a85beaf1f9bf0588a9c9  kernel/0001-dt-bindings-usb-add-Qualcomm-PMI632-micro-USB-RID.patch
+c19be0078b2c88297eaf113e7600d89f9cbccb9d11fe4256150217e83c0b46a6  kernel/0002-usb-qcom-add-PMI632-micro-USB-RID-diagnostics.patch
+f8c609f901da1a4d6d251382bea9d130335de99168a2f32d081b0d5c549860db  kernel/0003-arm64-dts-qcom-onclite-add-PMI632-RID-detector.patch
+000eb9b69f2eff779f52caae1815bd7319c22019286d04f87d169e676c22123c  kernel/0004-dt-bindings-usb-qcom-add-PMI632-role-switching.patch
+cca6b3ba3dcf532b4e3ea80f32a8511d235065b6f27facd88b7946c49f6cda03  kernel/0005-usb-qcom-add-PMI632-automatic-role-switching.patch
+80a63b927cb69a830ac4af4e844b90d19f856b88205027fde3898b4a96a4efaf  kernel/0006-usb-dwc3-reset-onclite-core-before-host-exit.patch
+6b3c8a8bf980546d82c536a1eb06e5fe6e008b804971b16c80f15e3ed1d9a02c  kernel/0007-usb-qcom-power-onclite-VBUS-in-host-mode.patch
+fc21e2b9a29f0551ecc30696969771aef717a67d91e6f52addc849f2114252de  kernel/0008-usb-qcom-verify-fixed-onclite-VBUS-current.patch
+351050e3b975da4f150baf2e0cc50373d1505259e5d3e32c15d249e0ed7b0f5b  kernel/0009-usb-qcom-make-onclite-host-removal-bounded.patch
+1f3f28f1dd7e633c7c22850fa22ac835f26e40771c4e470f67bd92bf75e5e9ea  kernel/0010-dt-bindings-usb-qcom-describe-PMI632-VBUS-fault-IRQs.patch
+edd316df22450aadfd5144ac2a5c6f1fb2dab9d1694b8df550686b04b310f308  kernel/0011-arm64-dts-qcom-onclite-add-VBUS-fault-IRQs.patch
+8ba9c5902ec696fed61b5d0ee25d8adf869d8237ad878480e2671960a46cdfbd  kernel/0012-usb-qcom-fail-closed-on-PMI632-VBUS-faults.patch
+6534660271c928f6c58c49c5dd4d571e079f6c1ecd7c65585846ab0bfc98f1ab  pmaports/0001-device-onclite-restore-USB-gadget-after-host-mode.patch
+51f18220959f399603ffe3abe8836ba521ccecf98a39665a5e8a81847f234b62  pmaports/0002-main-tethering-avoid-gadget-rebind-after-host-role-c.patch

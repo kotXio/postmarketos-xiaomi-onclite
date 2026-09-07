@@ -1,0 +1,74 @@
+From 5a24e4c9d169e809394697a29dc725713d0c4a8d Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 12:02:32 +0300
+Subject: [PATCH 2/2] main: tethering: avoid gadget rebind after host role
+ change
+
+Recheck the DWC3 role after the dispatcher delay and immediately before binding the UDC.
+
+Return successfully without binding if the controller changed to HOST.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ main/postmarketos-base-ui/APKBUILD            |  4 ++--
+ ...etworkManager-dispatcher.d-50-tethering.sh | 20 +++++++++++++++++++
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/main/postmarketos-base-ui/APKBUILD b/main/postmarketos-base-ui/APKBUILD
+index c058810e5d..047a0e6121 100644
+--- a/main/postmarketos-base-ui/APKBUILD
++++ b/main/postmarketos-base-ui/APKBUILD
+@@ -1,7 +1,7 @@
+ maintainer="Clayton Craft <clayton@craftyguy.net>"
+ pkgname=postmarketos-base-ui
+ pkgver=51
+-pkgrel=1
++pkgrel=2
+ pkgdesc="Meta package for minimal postmarketOS UI base"
+ url="https://postmarketos.org"
+ arch="noarch"
+@@ -369,7 +369,7 @@ cc86775a7820eb683e67df7d23ebae9d72699a643ff1452c71daf38ac6c39a84fd1686e67351ab0a
+ 66a7a72746e822676d0ec76160e39b65c711e574a6334f3aad38c563d3104b33d0619d50b92c9201546fd81bfd10cfe0e4a59278cbcbddf20a238f6ad71c050c  rootfs-usr-share-mkinitfs-files-10-wireless-regdb.files
+ 1b8add60574ec4644197cb93263c0653325c2e88e03673de918be5fb3280c7b81e8e97dce498850a07f2f3307771c44f3c876922e5cbd5207523ede31816296f  rootfs-usr-lib-NetworkManager-system-connections-USB_Networking.nmconnection
+ 36e0037f6d26a99db7b47831263be610d594e2c1c4a8ee7f6fc8b41092f501d3064d80b80ddf6a82b616bd2da09aa4da896074ad9f7fd53aba7e397da4190d22  rootfs-usr-lib-NetworkManager-dispatcher.d-50-dns-filter.sh
+-2cb383e69109336618fc93b34036ccdc6fd2746841dd1ac2f450b067c01334a54fa81c441b7909ad450f0ca5420e6917a5c537af40aa17594c60507883ddd167  rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
++255c54e4f07da28e454aa5f1a601b9255850995011e37787678f39e6e7bfef087525fc6b4c294ec2088ff521753eb8c4794be11f2fe830ee751836cc8feb4bea  rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
+ ecaa57d033a119a53a6574c27636b7c89d659d75ea48a973a6a4ff6f90e5d07202529fd489bfc9dfc7430f5b60f40612f6d5c06f7fab47e681b0a3112a874058  rootfs-usr-share-tinydm-env-wayland.d-50-sdl-wayland.sh
+ bf8db527c49fa724e640a90269ba2648a2555f5867b2adbfbd88d1f685261f757339757c09ee08f590c76de4bd3d0c73a47dea9bd340644dd4707e76152cefd1  rootfs-etc-profile.d-qt-mobile-controls.sh
+ 6e193eca3961a78d47b4656892eae34d019d9317a255a201f5ea61e3300caff04c526a27cd98d0edc072b36e3eaf3a1768f4cd27c5e2be8b19c167d535c820a6  rootfs-etc-profile.d-qt-wayland.sh
+diff --git a/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh b/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
+index 41dc5decd7..9d75495132 100644
+--- a/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
++++ b/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
+@@ -57,8 +57,28 @@ reactivate_gadget() {
+ 		return 0
+ 	fi
+ 
++	role_file="${PMOS_USB_GADGET_ROLE_FILE:-/sys/class/usb_role/${udc}-role-switch/role}"
++	if [ -r "$role_file" ]; then
++		role=$(cat "$role_file")
++		if [ "$role" != "device" ]; then
++			logger -t nm-tethering "USB role is $role, skipping gadget rebind"
++			return 0
++		fi
++	fi
++
+ 	printf '\n' > "$gadget/UDC"
+ 	sleep 1
++
++	# The role can change while the client disconnect is in progress. Leave the
++	# gadget unbound in HOST mode; the role-aware udev helper restores it when
++	# the controller returns to DEVICE mode.
++	if [ -r "$role_file" ]; then
++		role=$(cat "$role_file")
++		if [ "$role" != "device" ]; then
++			logger -t nm-tethering "USB role is $role, skipping gadget rebind"
++			return 0
++		fi
++	fi
+ 	if ! printf '%s\n' "$udc" > "$gadget/UDC"; then
+ 		logger -t nm-tethering "failed to reactivate gadget on $udc"
+ 		return 1
+-- 
+2.43.0
+

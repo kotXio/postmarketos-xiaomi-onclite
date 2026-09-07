@@ -1,0 +1,235 @@
+From ebca8f52e74df17eaacc510be8da6b8855cac62b Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sun, 6 Sep 2026 15:32:58 +0300
+Subject: [PATCH] usb: dwc3: reset onclite after host disconnect
+
+Loaded host teardown can still have child disconnect work in flight
+when the existing onclite pre-host-exit DWC3 reset runs. Resetting at
+that point invalidates outstanding xHCI commands and makes slot and
+endpoint cleanup wait for their timeout paths.
+
+Move the single onclite role-switch reset to a platform xHCI stop
+callback. USB core reaches this callback only after synchronous child
+disconnect and unlink completion, while xHCI halt and memory cleanup
+have not started. Keep the later generic reset as a fallback and
+suppress it only after the callback completed.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/dwc3/core.c      | 27 +++++++++++++++++----------
+ drivers/usb/dwc3/core.h      |  7 +++++++
+ drivers/usb/dwc3/host.c      | 24 ++++++++++++++++++++++++
+ drivers/usb/host/xhci-plat.c | 18 ++++++++++++++++++
+ drivers/usb/host/xhci-plat.h |  1 +
+ 5 files changed, 67 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index a1e9bfcb8..9bd69cc9c 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -162,7 +162,7 @@ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode, bool ignore_susphy)
+ }
+ EXPORT_SYMBOL_GPL(dwc3_set_prtcap);
+ 
+-static void dwc3_gctl_core_soft_reset(struct dwc3 *dwc)
++void dwc3_gctl_core_soft_reset(struct dwc3 *dwc)
+ {
+ 	u32 reg;
+ 
+@@ -189,7 +189,6 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	int ret;
+ 	u32 reg;
+ 	u32 desired_dr_role;
+-	bool onclite_early_core_reset = false;
+ 	int i;
+ 
+ 	mutex_lock(&dwc->mutex);
+@@ -197,6 +196,9 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	desired_dr_role = dwc->desired_dr_role;
+ 	spin_unlock_irqrestore(&dwc->lock, flags);
+ 
++	dwc->host_exit_reset_pending = false;
++	dwc->host_exit_reset_done = false;
++
+ 	pm_runtime_get_sync(dwc->dev);
+ 
+ 	if (dwc->current_dr_role == DWC3_GCTL_PRTCAP_OTG)
+@@ -212,17 +214,15 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 		goto out;
+ 
+ 	/*
+-	 * On onclite the xHCI controller does not acknowledge halt until the
+-	 * DWC3 core reset is asserted. Move the existing role-switch reset
+-	 * before xHCI unregister and skip its later duplicate.
++	 * On onclite the xHCI controller needs the role-switch core reset to
++	 * acknowledge halt. Defer that reset until USB core has synchronously
++	 * disconnected every host child, immediately before xHCI stop.
+ 	 */
+ 	if (of_machine_is_compatible("xiaomi,onclite") &&
+ 	    dwc->current_dr_role == DWC3_GCTL_PRTCAP_HOST &&
+ 	    desired_dr_role == DWC3_GCTL_PRTCAP_DEVICE &&
+-	    (DWC3_IP_IS(DWC3) || DWC3_VER_IS_PRIOR(DWC31, 190A))) {
+-		onclite_early_core_reset = true;
+-		dwc3_gctl_core_soft_reset(dwc);
+-	}
++	    (DWC3_IP_IS(DWC3) || DWC3_VER_IS_PRIOR(DWC31, 190A)))
++		dwc->host_exit_reset_pending = true;
+ 
+ 	switch (dwc->current_dr_role) {
+ 	case DWC3_GCTL_PRTCAP_HOST:
+@@ -247,13 +247,20 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	 * When current_dr_role is not set, there's no role switching.
+ 	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
+ 	 */
+-	if (!onclite_early_core_reset && dwc->current_dr_role &&
++	if (!dwc->host_exit_reset_done && dwc->current_dr_role &&
+ 	    ((DWC3_IP_IS(DWC3) ||
+ 			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
+ 			desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
+ 		dwc3_gctl_core_soft_reset(dwc);
+ 	}
+ 
++	if (dwc->host_exit_reset_done)
++		dev_info(dwc->dev,
++			 "[onclite-usb-v10] skipping later duplicate role-switch reset\n");
++
++	dwc->host_exit_reset_pending = false;
++	dwc->host_exit_reset_done = false;
++
+ 	spin_lock_irqsave(&dwc->lock, flags);
+ 
+ 	dwc3_set_prtcap(dwc, desired_dr_role, false);
+diff --git a/drivers/usb/dwc3/core.h b/drivers/usb/dwc3/core.h
+index a35b3db1f..5456a8262 100644
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -1049,6 +1049,10 @@ struct dwc3_glue_ops {
+  * @dr_mode: requested mode of operation
+  * @current_dr_role: current role of operation when in dual-role mode
+  * @desired_dr_role: desired role of operation when in dual-role mode
++ * @host_exit_reset_pending: true when host teardown must perform the
++ *		role-switch core reset at the xHCI stop boundary
++ * @host_exit_reset_done: true when host teardown performed the role-switch
++ *		core reset at the xHCI stop boundary
+  * @edev: extcon handle
+  * @edev_nb: extcon notifier
+  * @hsphy_mode: UTMI phy mode, one of following:
+@@ -1239,6 +1243,8 @@ struct dwc3 {
+ 	enum usb_dr_mode	dr_mode;
+ 	u32			current_dr_role;
+ 	u32			desired_dr_role;
++	bool			host_exit_reset_pending;
++	bool			host_exit_reset_done;
+ 	struct extcon_dev	*edev;
+ 	struct notifier_block	edev_nb;
+ 	enum usb_phy_interface	hsphy_mode;
+@@ -1582,6 +1588,7 @@ struct dwc3_gadget_ep_cmd_params {
+ 
+ /* prototypes */
+ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode, bool ignore_susphy);
++void dwc3_gctl_core_soft_reset(struct dwc3 *dwc);
+ void dwc3_set_mode(struct dwc3 *dwc, u32 mode);
+ u32 dwc3_core_fifo_space(struct dwc3_ep *dep, u8 type);
+ 
+diff --git a/drivers/usb/dwc3/host.c b/drivers/usb/dwc3/host.c
+index 96b588bd0..ceda29986 100644
+--- a/drivers/usb/dwc3/host.c
++++ b/drivers/usb/dwc3/host.c
+@@ -77,8 +77,32 @@ static void dwc3_xhci_plat_start(struct usb_hcd *hcd)
+ 	dwc3_enable_susphy(dwc, true);
+ }
+ 
++static void dwc3_xhci_plat_stop(struct usb_hcd *hcd)
++{
++	struct platform_device *pdev;
++	struct dwc3 *dwc;
++
++	if (!usb_hcd_is_primary_hcd(hcd))
++		return;
++
++	pdev = to_platform_device(hcd->self.controller);
++	dwc = dev_get_drvdata(pdev->dev.parent);
++
++	if (!of_machine_is_compatible("xiaomi,onclite") ||
++	    !dwc->host_exit_reset_pending)
++		return;
++
++	dev_info(dwc->dev,
++		 "[onclite-usb-v10] resetting DWC3 after USB child disconnect\n");
++	dwc3_gctl_core_soft_reset(dwc);
++	dwc->host_exit_reset_done = true;
++	dev_info(dwc->dev,
++		 "[onclite-usb-v10] post-disconnect reset complete\n");
++}
++
+ static const struct xhci_plat_priv dwc3_xhci_plat_quirk = {
+ 	.plat_start = dwc3_xhci_plat_start,
++	.plat_stop = dwc3_xhci_plat_stop,
+ };
+ 
+ static void dwc3_host_fill_xhci_irq_res(struct dwc3 *dwc,
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 074d9c731..f716d6e2c 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -30,6 +30,7 @@ static struct hc_driver __read_mostly xhci_plat_hc_driver;
+ 
+ static int xhci_plat_setup(struct usb_hcd *hcd);
+ static int xhci_plat_start(struct usb_hcd *hcd);
++static void xhci_plat_stop(struct usb_hcd *hcd);
+ 
+ static const struct xhci_driver_overrides xhci_plat_overrides __initconst = {
+ 	.extra_priv_size = sizeof(struct xhci_plat_priv),
+@@ -45,6 +46,14 @@ static void xhci_priv_plat_start(struct usb_hcd *hcd)
+ 		priv->plat_start(hcd);
+ }
+ 
++static void xhci_priv_plat_stop(struct usb_hcd *hcd)
++{
++	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
++
++	if (priv->plat_stop)
++		priv->plat_stop(hcd);
++}
++
+ static int xhci_priv_init_quirk(struct usb_hcd *hcd)
+ {
+ 	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
+@@ -111,6 +120,14 @@ static int xhci_plat_start(struct usb_hcd *hcd)
+ 	return xhci_run(hcd);
+ }
+ 
++static void xhci_plat_stop(struct usb_hcd *hcd)
++{
++	if (usb_hcd_is_primary_hcd(hcd))
++		xhci_priv_plat_stop(hcd);
++
++	xhci_stop(hcd);
++}
++
+ #ifdef CONFIG_OF
+ static const struct xhci_plat_priv xhci_plat_marvell_armada = {
+ 	.init_quirk = xhci_mvebu_mbus_init_quirk,
+@@ -644,6 +661,7 @@ MODULE_ALIAS("platform:xhci-hcd");
+ static int __init xhci_plat_init(void)
+ {
+ 	xhci_init_driver(&xhci_plat_hc_driver, &xhci_plat_overrides);
++	xhci_plat_hc_driver.stop = xhci_plat_stop;
+ 	return platform_driver_register(&usb_generic_xhci_driver);
+ }
+ module_init(xhci_plat_init);
+diff --git a/drivers/usb/host/xhci-plat.h b/drivers/usb/host/xhci-plat.h
+index 00751d851..cd029f1ce 100644
+--- a/drivers/usb/host/xhci-plat.h
++++ b/drivers/usb/host/xhci-plat.h
+@@ -18,6 +18,7 @@ struct xhci_plat_priv {
+ 	bool power_lost;
+ 	unsigned sideband_at_suspend:1;
+ 	void (*plat_start)(struct usb_hcd *);
++	void (*plat_stop)(struct usb_hcd *hcd);
+ 	int (*init_quirk)(struct usb_hcd *);
+ 	int (*suspend_quirk)(struct usb_hcd *);
+ 	int (*resume_quirk)(struct usb_hcd *);
+-- 
+2.43.0
+

@@ -1,0 +1,339 @@
+From 100466b2897ebefab155fbfb7a1f06158349c400 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 11:49:22 +0300
+Subject: [PATCH 05/12] usb: qcom: add PMI632 automatic role switching
+
+Select HOST for grounded ID and DEVICE when RID is released.
+
+Restore DEVICE after read or transition failures.
+
+Keep VBUS control disabled at this stage.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/common/Kconfig                 |   4 +-
+ drivers/usb/common/qcom-pmi632-micro-usb.c | 169 ++++++++++++++++++---
+ 2 files changed, 150 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/usb/common/Kconfig b/drivers/usb/common/Kconfig
+index 7dffafda3..eb07404e7 100644
+--- a/drivers/usb/common/Kconfig
++++ b/drivers/usb/common/Kconfig
+@@ -56,8 +56,8 @@ config USB_QCOM_PMI632_MICRO_USB
+ 	help
+ 	  Enable micro-USB ID/RID detection using the USB Type-C peripheral
+ 	  found in the Qualcomm PMI632 PMIC. The first implementation is a
+-	  diagnostic slice: it enables only the RID change interrupt and logs
+-	  the debounced raw state without changing USB role or VBUS power.
++	  minimal role provider: it selects host when RID is grounded and
++	  device otherwise. VBUS power is not controlled without a supply.
+ 
+ 	  This should be enabled only on boards whose firmware has configured
+ 	  the PMI632 peripheral for micro-USB operation.
+diff --git a/drivers/usb/common/qcom-pmi632-micro-usb.c b/drivers/usb/common/qcom-pmi632-micro-usb.c
+index eb5686991..4fd8c19c4 100644
+--- a/drivers/usb/common/qcom-pmi632-micro-usb.c
++++ b/drivers/usb/common/qcom-pmi632-micro-usb.c
+@@ -1,9 +1,8 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * Qualcomm PMI632 micro-USB RID detector
++ * Qualcomm PMI632 micro-USB role detector
+  *
+- * Diagnostic v1 intentionally reports RID changes without changing the USB
+- * role or controlling VBUS.
++ * Role-only v2 intentionally leaves VBUS control disabled.
+  */
+ 
+ #include <linux/atomic.h>
+@@ -13,7 +12,9 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
++#include <linux/usb/role.h>
+ #include <linux/workqueue.h>
+ 
+ #define PMI632_TYPEC_MISC_STATUS		0x0b
+@@ -21,15 +22,17 @@
+ #define PMI632_TYPEC_INTERRUPT_EN_CFG_2		0x60
+ #define PMI632_TYPEC_U_USB_CFG			0x70
+ #define PMI632_TYPEC_PMI632_U_USB_CFG		0x73
++#define PMI632_OTG_CMD_REG			0x1140
+ 
+ #define PMI632_TYPEC_VBUS_DETECT		BIT(5)
+ #define PMI632_U_USB_GROUND_NOVBUS		BIT(6)
+ #define PMI632_MICRO_USB_STATE_CHANGE_INT_EN	BIT(5)
+ #define PMI632_EN_MICRO_USB_MODE		BIT(0)
+ #define PMI632_MICRO_USB_MODE_ONLY		BIT(0)
++#define PMI632_OTG_EN				BIT(0)
+ 
+ #define PMI632_RID_DEBOUNCE_MS			50
+-#define PMI632_RID_LOG_PREFIX			"[pmi632-rid-v1] "
++#define PMI632_RID_LOG_PREFIX			"[pmi632-role-v2] "
+ 
+ struct pmi632_rid_state {
+ 	unsigned int misc;
+@@ -37,6 +40,7 @@ struct pmi632_rid_state {
+ 	unsigned int irq_enable_2;
+ 	unsigned int u_usb_cfg;
+ 	unsigned int pmi632_u_usb_cfg;
++	unsigned int otg_cmd;
+ };
+ 
+ struct pmi632_micro_usb {
+@@ -45,11 +49,14 @@ struct pmi632_micro_usb {
+ 	struct delayed_work rid_work;
+ 	atomic_t irq_count;
+ 	u32 base;
++	struct usb_role_switch *role_sw;
+ 	int rid_irq;
+ 	unsigned int saved_irq_enable_2;
++	enum usb_role last_role;
+ 	bool irq_disabled;
+ 	bool irq_gate_touched;
+ 	bool irq_gate_restored;
++	bool role_initialized;
+ };
+ 
+ static int pmi632_rid_read_reg(struct pmi632_micro_usb *usb,
+@@ -91,8 +98,18 @@ static int pmi632_rid_read_state(struct pmi632_micro_usb *usb,
+ 	if (ret)
+ 		return ret;
+ 
+-	return pmi632_rid_read_reg(usb, PMI632_TYPEC_PMI632_U_USB_CFG,
+-				    &state->pmi632_u_usb_cfg);
++	ret = pmi632_rid_read_reg(usb, PMI632_TYPEC_PMI632_U_USB_CFG,
++				  &state->pmi632_u_usb_cfg);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(usb->regmap, PMI632_OTG_CMD_REG, &state->otg_cmd);
++	if (ret)
++		dev_err(usb->dev,
++			PMI632_RID_LOG_PREFIX "failed to read %#06x: %pe\n",
++			PMI632_OTG_CMD_REG, ERR_PTR(ret));
++
++	return ret;
+ }
+ 
+ static void pmi632_rid_report_state(struct pmi632_micro_usb *usb,
+@@ -101,17 +118,82 @@ static void pmi632_rid_report_state(struct pmi632_micro_usb *usb,
+ {
+ 	dev_info(usb->dev,
+ 		 PMI632_RID_LOG_PREFIX
+-		 "%s irq_count=%d rid_grounded=%u vbus_present=%u\n",
++		 "%s irq_count=%d rid_grounded=%u vbus_present=%u otg_enabled=%u\n",
+ 		 reason, atomic_read(&usb->irq_count),
+ 		 !!(state->u_usb & PMI632_U_USB_GROUND_NOVBUS),
+-		 !!(state->misc & PMI632_TYPEC_VBUS_DETECT));
++		 !!(state->misc & PMI632_TYPEC_VBUS_DETECT),
++		 !!(state->otg_cmd & PMI632_OTG_EN));
+ 	dev_info(usb->dev,
+ 		 PMI632_RID_LOG_PREFIX
+-		 "registers: 150b=%#04x 150f=%#04x 1560=%#04x 1570=%#04x 1573=%#04x\n",
++		 "registers: 1140=%#04x 150b=%#04x 150f=%#04x 1560=%#04x 1570=%#04x 1573=%#04x\n",
++		 state->otg_cmd,
+ 		 state->misc, state->u_usb, state->irq_enable_2,
+ 		 state->u_usb_cfg, state->pmi632_u_usb_cfg);
+ }
+ 
++static int pmi632_role_set(struct pmi632_micro_usb *usb,
++			   enum usb_role role, const char *reason)
++{
++	int fallback_ret;
++	int ret;
++
++	if (usb->role_initialized && usb->last_role == role) {
++		dev_info(usb->dev,
++			 PMI632_RID_LOG_PREFIX "%s role already %s\n",
++			 reason, usb_role_string(role));
++		return 0;
++	}
++
++	dev_info(usb->dev, PMI632_RID_LOG_PREFIX "%s role %s -> %s\n",
++		 reason,
++		 usb->role_initialized ? usb_role_string(usb->last_role) : "unknown",
++		 usb_role_string(role));
++
++	ret = usb_role_switch_set_role(usb->role_sw, role);
++	if (!ret) {
++		usb->last_role = role;
++		usb->role_initialized = true;
++		dev_info(usb->dev,
++			 PMI632_RID_LOG_PREFIX "%s role now %s; VBUS disabled\n",
++			 reason, usb_role_string(role));
++		return 0;
++	}
++
++	dev_err(usb->dev,
++		PMI632_RID_LOG_PREFIX "%s failed to set role %s: %pe\n",
++		reason, usb_role_string(role), ERR_PTR(ret));
++
++	if (role == USB_ROLE_DEVICE)
++		return ret;
++
++	fallback_ret = usb_role_switch_set_role(usb->role_sw,
++						USB_ROLE_DEVICE);
++	if (fallback_ret) {
++		dev_err(usb->dev,
++			PMI632_RID_LOG_PREFIX
++			"%s failed to restore device role: %pe\n",
++			reason, ERR_PTR(fallback_ret));
++	} else {
++		usb->last_role = USB_ROLE_DEVICE;
++		usb->role_initialized = true;
++		dev_info(usb->dev,
++			 PMI632_RID_LOG_PREFIX
++			 "%s restored device role after failure\n", reason);
++	}
++
++	return ret;
++}
++
++static int pmi632_role_apply_state(struct pmi632_micro_usb *usb,
++				   const struct pmi632_rid_state *state,
++				   const char *reason)
++{
++	enum usb_role role = state->u_usb & PMI632_U_USB_GROUND_NOVBUS ?
++			     USB_ROLE_HOST : USB_ROLE_DEVICE;
++
++	return pmi632_role_set(usb, role, reason);
++}
++
+ static void pmi632_rid_work(struct work_struct *work)
+ {
+ 	struct pmi632_micro_usb *usb =
+@@ -119,8 +201,13 @@ static void pmi632_rid_work(struct work_struct *work)
+ 			     rid_work);
+ 	struct pmi632_rid_state state;
+ 
+-	if (!pmi632_rid_read_state(usb, &state))
+-		pmi632_rid_report_state(usb, &state, "debounced-irq");
++	if (pmi632_rid_read_state(usb, &state)) {
++		pmi632_role_set(usb, USB_ROLE_DEVICE, "state-read-failure");
++		return;
++	}
++
++	pmi632_rid_report_state(usb, &state, "debounced-irq");
++	pmi632_role_apply_state(usb, &state, "debounced-irq");
+ }
+ 
+ static irqreturn_t pmi632_rid_irq(int irq, void *data)
+@@ -159,6 +246,16 @@ static void pmi632_rid_restore_irq_gate(struct pmi632_micro_usb *usb)
+ 	usb->irq_gate_restored = true;
+ }
+ 
++static void pmi632_role_restore_device(struct pmi632_micro_usb *usb,
++				       const char *reason)
++{
++	if (!usb->role_sw ||
++	    (usb->role_initialized && usb->last_role == USB_ROLE_DEVICE))
++		return;
++
++	pmi632_role_set(usb, USB_ROLE_DEVICE, reason);
++}
++
+ static void pmi632_rid_quiesce(struct pmi632_micro_usb *usb)
+ {
+ 	if (!usb->irq_disabled) {
+@@ -167,6 +264,7 @@ static void pmi632_rid_quiesce(struct pmi632_micro_usb *usb)
+ 	}
+ 
+ 	cancel_delayed_work_sync(&usb->rid_work);
++	pmi632_role_restore_device(usb, "quiesce");
+ 	pmi632_rid_restore_irq_gate(usb);
+ }
+ 
+@@ -176,6 +274,7 @@ static int pmi632_micro_usb_probe(struct platform_device *pdev)
+ 	struct pmi632_micro_usb *usb;
+ 	struct pmi632_rid_state state;
+ 	unsigned int trigger;
++	struct fwnode_handle *connector;
+ 	int ret;
+ 
+ 	usb = devm_kzalloc(dev, sizeof(*usb), GFP_KERNEL);
+@@ -223,14 +322,31 @@ static int pmi632_micro_usb_probe(struct platform_device *pdev)
+ 				     PMI632_RID_LOG_PREFIX
+ 				     "firmware did not enable micro-USB mode\n");
+ 
++	connector = device_get_named_child_node(dev, "connector");
++	if (!connector)
++		return dev_err_probe(dev, -ENODEV,
++				     PMI632_RID_LOG_PREFIX
++				     "missing connector child\n");
++
++	usb->role_sw = fwnode_usb_role_switch_get(connector);
++	fwnode_handle_put(connector);
++	if (IS_ERR_OR_NULL(usb->role_sw)) {
++		ret = usb->role_sw ? PTR_ERR(usb->role_sw) : -ENODEV;
++		usb->role_sw = NULL;
++		return dev_err_probe(dev, ret,
++				     PMI632_RID_LOG_PREFIX
++				     "failed to get USB role switch\n");
++	}
++
+ 	usb->saved_irq_enable_2 = state.irq_enable_2;
+ 	ret = devm_request_threaded_irq(dev, usb->rid_irq, NULL,
+ 					pmi632_rid_irq, IRQF_ONESHOT,
+ 					"pmi632-micro-usb-rid", usb);
+-	if (ret)
+-		return dev_err_probe(dev, ret,
+-				     PMI632_RID_LOG_PREFIX
+-				     "failed to request RID IRQ\n");
++	if (ret) {
++		ret = dev_err_probe(dev, ret, PMI632_RID_LOG_PREFIX
++				    "failed to request RID IRQ\n");
++		goto err_put_role_sw;
++	}
+ 
+ 	ret = regmap_update_bits(usb->regmap,
+ 				 usb->base + PMI632_TYPEC_INTERRUPT_EN_CFG_2,
+@@ -253,20 +369,31 @@ static int pmi632_micro_usb_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, usb);
+ 	pmi632_rid_report_state(usb, &state, "armed");
+-	dev_info(dev, PMI632_RID_LOG_PREFIX
+-		 "diagnostic armed; role and VBUS control are disabled\n");
++	ret = pmi632_role_apply_state(usb, &state, "initial");
++	if (ret)
++		goto err_quiesce;
++
++	dev_info(dev,
++		 PMI632_RID_LOG_PREFIX "role-only armed; VBUS control disabled\n");
+ 
+ 	return 0;
+ 
+ err_quiesce:
+ 	pmi632_rid_quiesce(usb);
+-	return dev_err_probe(dev, ret,
+-			     PMI632_RID_LOG_PREFIX "failed to arm RID IRQ\n");
++err_put_role_sw:
++	usb_role_switch_put(usb->role_sw);
++	usb->role_sw = NULL;
++	return dev_err_probe(dev, ret, PMI632_RID_LOG_PREFIX
++			     "failed to arm RID role provider\n");
+ }
+ 
+ static void pmi632_micro_usb_remove(struct platform_device *pdev)
+ {
+-	pmi632_rid_quiesce(platform_get_drvdata(pdev));
++	struct pmi632_micro_usb *usb = platform_get_drvdata(pdev);
++
++	pmi632_rid_quiesce(usb);
++	usb_role_switch_put(usb->role_sw);
++	usb->role_sw = NULL;
+ }
+ 
+ static void pmi632_micro_usb_shutdown(struct platform_device *pdev)
+@@ -291,5 +418,5 @@ static struct platform_driver pmi632_micro_usb_driver = {
+ };
+ module_platform_driver(pmi632_micro_usb_driver);
+ 
+-MODULE_DESCRIPTION("Qualcomm PMI632 micro-USB RID detector");
++MODULE_DESCRIPTION("Qualcomm PMI632 micro-USB role detector");
+ MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

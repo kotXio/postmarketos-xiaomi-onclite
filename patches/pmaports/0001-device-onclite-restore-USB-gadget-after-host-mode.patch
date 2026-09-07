@@ -1,0 +1,282 @@
+From 82c69385313830a123c4ca54169df690ed6105ff Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 12:02:31 +0300
+Subject: [PATCH 1/2] device: onclite: restore USB gadget after host mode
+
+Add an onclite-only udev helper that binds the existing configfs gadget when DWC3 returns to DEVICE.
+
+Serialize it with the tethering dispatcher and refuse incomplete or mismatched gadget state.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../90-postmarketos-onclite-usb-gadget.rules  |  3 +
+ .../APKBUILD                                  | 34 +++++++
+ .../postmarketos-onclite-usb-gadget-bind      | 94 +++++++++++++++++++
+ ...tmarketos-onclite-usb-gadget-bind@.service | 10 ++
+ main/postmarketos-base-ui/APKBUILD            |  4 +-
+ ...etworkManager-dispatcher.d-50-tethering.sh | 44 +++++----
+ 6 files changed, 170 insertions(+), 19 deletions(-)
+ create mode 100644 device/testing/postmarketos-onclite-usb-gadget-lifecycle/90-postmarketos-onclite-usb-gadget.rules
+ create mode 100644 device/testing/postmarketos-onclite-usb-gadget-lifecycle/APKBUILD
+ create mode 100755 device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind
+ create mode 100644 device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind@.service
+
+diff --git a/device/testing/postmarketos-onclite-usb-gadget-lifecycle/90-postmarketos-onclite-usb-gadget.rules b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/90-postmarketos-onclite-usb-gadget.rules
+new file mode 100644
+index 0000000000..82bfef6c22
+--- /dev/null
++++ b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/90-postmarketos-onclite-usb-gadget.rules
+@@ -0,0 +1,3 @@
++# The helper itself verifies xiaomi,onclite and fails closed on every mismatch.
++ACTION=="add", SUBSYSTEM=="udc", KERNEL=="7000000.usb", TAG+="systemd", \
++ENV{SYSTEMD_WANTS}+="postmarketos-onclite-usb-gadget-bind@%k.service"
+diff --git a/device/testing/postmarketos-onclite-usb-gadget-lifecycle/APKBUILD b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/APKBUILD
+new file mode 100644
+index 0000000000..77df787430
+--- /dev/null
++++ b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/APKBUILD
+@@ -0,0 +1,34 @@
++# Local experimental package for Xiaomi Redmi 7 (onclite).
++pkgname=postmarketos-onclite-usb-gadget-lifecycle
++pkgver=1
++pkgrel=0
++pkgdesc="Restore the onclite USB gadget after host mode"
++url="https://postmarketos.org"
++arch="noarch"
++license="GPL-3.0-or-later"
++depends="
++	postmarketos-base-ui-networkmanager-usb-tethering
++	systemd
++	util-linux
++"
++options="!check"
++source="
++	90-postmarketos-onclite-usb-gadget.rules
++	postmarketos-onclite-usb-gadget-bind
++	postmarketos-onclite-usb-gadget-bind@.service
++"
++
++package() {
++	install -Dm644 90-postmarketos-onclite-usb-gadget.rules \
++		-t "$pkgdir/usr/lib/udev/rules.d/"
++	install -Dm755 postmarketos-onclite-usb-gadget-bind \
++		-t "$pkgdir/usr/libexec/"
++	install -Dm644 postmarketos-onclite-usb-gadget-bind@.service \
++		-t "$pkgdir/usr/lib/systemd/system/"
++}
++
++sha512sums="
++2393f3b91749891ce3bffca16839c60c03b1e9cc96e2f217481550b3e19ab982c4b615d084cb7b1faf70367decbdca5c0004b66d4cbc01a476535729f2d0633d  90-postmarketos-onclite-usb-gadget.rules
++b7963e1a4369b00bb698b2785c6b594c44958d735d60b674e5a871e324fdf1f84f62f6ff263271a1d3a496e25581e41dbd3098e125c08d4fe9a32234e6dca341  postmarketos-onclite-usb-gadget-bind
++f1a1e6c9249e5882f6da2370ee69b80cafbda412810814f44b6665ee0b1a9a1106e9219ba0419d13383c664a7b711a2d50787015ae5a59973cde873fe221eb20  postmarketos-onclite-usb-gadget-bind@.service
++"
+diff --git a/device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind
+new file mode 100755
+index 0000000000..b2e38da598
+--- /dev/null
++++ b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind
+@@ -0,0 +1,94 @@
++#!/bin/sh
++set -eu
++
++tag="postmarketos-onclite-usb-gadget"
++udc="${1:-}"
++configfs="${PMOS_USB_GADGET_CONFIGFS:-/sys/kernel/config}"
++role_file="${PMOS_USB_GADGET_ROLE_FILE:-/sys/class/usb_role/7000000.usb-role-switch/role}"
++udc_root="${PMOS_USB_GADGET_UDC_ROOT:-/sys/class/udc}"
++compatible="${PMOS_USB_GADGET_COMPATIBLE:-/proc/device-tree/compatible}"
++gadget_lock="${PMOS_USB_GADGET_LOCK:-/run/lock/postmarketos-usb-gadget.lock}"
++gadget="$configfs/usb_gadget/g1"
++
++log()
++{
++	if [ "${PMOS_USB_GADGET_TEST:-0}" = "1" ]; then
++		printf '%s: %s\n' "$tag" "$*" >&2
++	else
++		logger -t "$tag" -- "$*"
++	fi
++}
++
++is_onclite()
++{
++	[ -r "$compatible" ] &&
++		tr '\000' '\n' < "$compatible" | grep -Fxq 'xiaomi,onclite'
++}
++
++has_network_function()
++{
++	for function in ncm.usb0 rndis.usb0; do
++		link="$gadget/configs/c.1/$function"
++		if [ -L "$link" ] && [ -e "$link" ]; then
++			return 0
++		fi
++	done
++	return 1
++}
++
++if [ "$udc" != "7000000.usb" ]; then
++	log "ignoring unexpected UDC $udc"
++	exit 0
++fi
++
++if ! is_onclite; then
++	log "ignoring non-onclite device"
++	exit 0
++fi
++
++if [ ! -d "$udc_root/$udc" ]; then
++	log "UDC $udc is not present"
++	exit 0
++fi
++
++if [ ! -r "$role_file" ] || [ "$(cat "$role_file")" != "device" ]; then
++	log "USB role is not device"
++	exit 0
++fi
++
++if [ ! -r "$gadget/UDC" ] || ! has_network_function; then
++	log "gadget configuration is incomplete"
++	exit 0
++fi
++
++mkdir -p "${gadget_lock%/*}"
++exec 9>"$gadget_lock"
++flock -x 9
++
++# Recheck every transition-sensitive condition after acquiring the shared lock.
++if [ ! -d "$udc_root/$udc" ] ||
++	[ "$(cat "$role_file")" != "device" ] ||
++	! has_network_function; then
++	log "state changed before bind"
++	exit 0
++fi
++
++current_udc="$(cat "$gadget/UDC")"
++if [ "$current_udc" = "$udc" ]; then
++	exit 0
++fi
++if [ -n "$current_udc" ]; then
++	log "gadget is already bound to unexpected UDC $current_udc"
++	exit 0
++fi
++
++if ! printf '%s\n' "$udc" > "$gadget/UDC"; then
++	log "failed to bind gadget to $udc"
++	exit 1
++fi
++if [ "$(cat "$gadget/UDC")" != "$udc" ]; then
++	log "UDC readback mismatch after bind"
++	exit 1
++fi
++
++log "bound complete g1 gadget to $udc"
+diff --git a/device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind@.service b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind@.service
+new file mode 100644
+index 0000000000..edc77d06f1
+--- /dev/null
++++ b/device/testing/postmarketos-onclite-usb-gadget-lifecycle/postmarketos-onclite-usb-gadget-bind@.service
+@@ -0,0 +1,10 @@
++[Unit]
++Description=Bind postmarketOS USB gadget on Xiaomi onclite UDC %I
++After=sys-kernel-config.mount
++ConditionPathExists=/sys/class/udc/%I
++
++[Service]
++Type=oneshot
++ExecStart=/usr/libexec/postmarketos-onclite-usb-gadget-bind %I
++TimeoutStartSec=5
++NoNewPrivileges=yes
+diff --git a/main/postmarketos-base-ui/APKBUILD b/main/postmarketos-base-ui/APKBUILD
+index 91a33873a7..c058810e5d 100644
+--- a/main/postmarketos-base-ui/APKBUILD
++++ b/main/postmarketos-base-ui/APKBUILD
+@@ -1,7 +1,7 @@
+ maintainer="Clayton Craft <clayton@craftyguy.net>"
+ pkgname=postmarketos-base-ui
+ pkgver=51
+-pkgrel=0
++pkgrel=1
+ pkgdesc="Meta package for minimal postmarketOS UI base"
+ url="https://postmarketos.org"
+ arch="noarch"
+@@ -369,7 +369,7 @@ cc86775a7820eb683e67df7d23ebae9d72699a643ff1452c71daf38ac6c39a84fd1686e67351ab0a
+ 66a7a72746e822676d0ec76160e39b65c711e574a6334f3aad38c563d3104b33d0619d50b92c9201546fd81bfd10cfe0e4a59278cbcbddf20a238f6ad71c050c  rootfs-usr-share-mkinitfs-files-10-wireless-regdb.files
+ 1b8add60574ec4644197cb93263c0653325c2e88e03673de918be5fb3280c7b81e8e97dce498850a07f2f3307771c44f3c876922e5cbd5207523ede31816296f  rootfs-usr-lib-NetworkManager-system-connections-USB_Networking.nmconnection
+ 36e0037f6d26a99db7b47831263be610d594e2c1c4a8ee7f6fc8b41092f501d3064d80b80ddf6a82b616bd2da09aa4da896074ad9f7fd53aba7e397da4190d22  rootfs-usr-lib-NetworkManager-dispatcher.d-50-dns-filter.sh
+-802c8ca1603c6bc536f83ea7158f9fb9cf0dd94c59cadab9d059c738ca6bc5c1deb1c982996efd3b1909d01592e5a3e32f005c043e203a83361d3c64994b713b  rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
++2cb383e69109336618fc93b34036ccdc6fd2746841dd1ac2f450b067c01334a54fa81c441b7909ad450f0ca5420e6917a5c537af40aa17594c60507883ddd167  rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
+ ecaa57d033a119a53a6574c27636b7c89d659d75ea48a973a6a4ff6f90e5d07202529fd489bfc9dfc7430f5b60f40612f6d5c06f7fab47e681b0a3112a874058  rootfs-usr-share-tinydm-env-wayland.d-50-sdl-wayland.sh
+ bf8db527c49fa724e640a90269ba2648a2555f5867b2adbfbd88d1f685261f757339757c09ee08f590c76de4bd3d0c73a47dea9bd340644dd4707e76152cefd1  rootfs-etc-profile.d-qt-mobile-controls.sh
+ 6e193eca3961a78d47b4656892eae34d019d9317a255a201f5ea61e3300caff04c526a27cd98d0edc072b36e3eaf3a1768f4cd27c5e2be8b19c167d535c820a6  rootfs-etc-profile.d-qt-wayland.sh
+diff --git a/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh b/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
+index 63f44ff04d..41dc5decd7 100644
+--- a/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
++++ b/main/postmarketos-base-ui/rootfs-usr-lib-NetworkManager-dispatcher.d-50-tethering.sh
+@@ -15,10 +15,13 @@ con_uuid="83bd1823-feca-4c2b-9205-4b83dc792e1f"
+ usb_network_function="${deviceinfo_usb_network_function:-ncm.usb0}"
+ disable_dhcpd="${deviceinfo_disable_dhcpd:-false}"
+ usb_network_function_fallback="rndis.usb0"
+-if [ -n "$(cat /sys/kernel/config/usb_gadget/g1/UDC)" ]; then
++configfs="/sys/kernel/config"
++gadget="$configfs/usb_gadget/g1"
++gadget_lock="/run/lock/postmarketos-usb-gadget.lock"
++if [ -r "$gadget/UDC" ] && [ -n "$(cat "$gadget/UDC")" ]; then
+ 	interface="$(
+-		cat "/sys/kernel/config/usb_gadget/g1/functions/$usb_network_function/ifname" 2>/dev/null ||
+-		cat "/sys/kernel/config/usb_gadget/g1/functions/$usb_network_function_fallback/ifname" 2>/dev/null ||
++		cat "$gadget/functions/$usb_network_function/ifname" 2>/dev/null ||
++		cat "$gadget/functions/$usb_network_function_fallback/ifname" 2>/dev/null ||
+ 		echo 'usb0'
+ 	)"
+ else
+@@ -35,26 +38,33 @@ if [ "$DEVICE_IFACE" != "$interface" ]; then
+ fi
+ 
+ # Trigger a disconnect/connect event on the client side to request a new DHCP lease.
++# Serialize this with role-change recovery and use the configfs mount created by
++# the initramfs. A secondary mount must not be removed while it still exposes
++# the live gadget tree.
+ reactivate_gadget() {
+-	# Mount configFS
+-	mkdir -p /config
+-	mount -t configfs none /config || true
++	if [ ! -r "$gadget/UDC" ]; then
++		logger -t nm-tethering "gadget unavailable, skipping reactivation"
++		return 0
++	fi
++
++	mkdir -p "${gadget_lock%/*}"
++	exec 9>"$gadget_lock"
++	flock -x 9
+ 
+-	logger -t nm-tethering "configFS mounted"
++	udc=$(cat "$gadget/UDC")
++	if [ -z "$udc" ]; then
++		logger -t nm-tethering "gadget unbound, skipping reactivation"
++		return 0
++	fi
+ 
+-	# Reactivate gadget
+-	udc=$(cat /config/usb_gadget/g1/UDC)
+-	echo "" > /config/usb_gadget/g1/UDC
++	printf '\n' > "$gadget/UDC"
+ 	sleep 1
+-	echo "$udc" > /config/usb_gadget/g1/UDC
++	if ! printf '%s\n' "$udc" > "$gadget/UDC"; then
++		logger -t nm-tethering "failed to reactivate gadget on $udc"
++		return 1
++	fi
+ 
+ 	logger -t nm-tethering "gadget reactivated"
+-
+-	# Unmount configFS
+-	umount /config
+-	rm -rf /config
+-
+-	logger -t nm-tethering "configFS unmounted"
+ }
+ 
+ # Default static IP for SSH acccess
+-- 
+2.43.0
+

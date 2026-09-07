@@ -1,0 +1,90 @@
+# Kernel config based on: defconfig, msm8953.config, and device configs
+maintainer="Barnabas Czeman <barnabas.czeman@postmarketos.org>"
+_flavor="postmarketos-qcom-msm8953"
+pkgname=linux-$_flavor
+pkgver=7.0.9
+pkgrel=16
+pkgdesc="Close to mainline linux kernel for Qualcomm Snapdragon MSM8953"
+arch="aarch64"
+_carch="arm64"
+url="https://github.com/msm8953-mainline/linux"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps
+	pmb:cross-native
+	pmb:kconfigcheck-community
+"
+makedepends="
+	bison
+	clang
+	findutils
+	flex
+	lld
+	llvm
+	openssl-dev
+	perl
+	postmarketos-installkernel
+	python3
+"
+
+_tag="$pkgver-r0"
+
+source="
+	$pkgname-v$_tag.tar.gz::$url/archive/v$_tag.tar.gz
+	config-$_flavor.aarch64
+	0001-Add-PMI632-micro-USB-RID-diagnostics.patch
+	0002-Add-PMI632-automatic-USB-role-switching.patch
+	0003-usb-dwc3-reset-onclite-core-before-host-exit.patch
+	0004-usb-qcom-power-onclite-VBUS-in-host-mode.patch
+	0005-usb-qcom-verify-fixed-onclite-VBUS-current.patch
+	0006-usb-dwc3-reset-onclite-after-host-disconnect.patch
+	0007-usb-xhci-quiesce-onclite-before-host-removal.patch
+	0008-usb-xhci-keep-onclite-reset-at-primary-stop.patch
+	0009-usb-dwc3-reset-onclite-after-xHCI-removal.patch
+	0010-dt-bindings-usb-qcom-describe-PMI632-VBUS-fault-IRQs.patch
+	0011-arm64-dts-qcom-onclite-add-VBUS-fault-IRQs.patch
+	0012-usb-qcom-fail-closed-on-PMI632-VBUS-faults.patch
+"
+builddir="$srcdir/linux-$_tag"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/config-$_flavor.$arch" .config
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" LLVM=1 \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1 ))-$_flavor"
+}
+
+package() {
+	mkdir -p "$pkgdir"/boot
+
+	make zinstall modules_install dtbs_install \
+		ARCH="$_carch" \
+		LLVM=1 \
+		INSTALL_PATH="$pkgdir"/boot \
+		INSTALL_MOD_PATH="$pkgdir"/usr \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir/boot/dtbs"
+	rm -f "$pkgdir"/usr/lib/modules/*/build "$pkgdir"/usr/lib/modules/*/source
+
+	install -Dm644 "$builddir/include/config/kernel.release" \
+		"$pkgdir/usr/share/kernel/$_flavor/kernel.release"
+}
+sha512sums="
+660bb93c2d19efe27a0c19a795801cbbf092f19589b96a857e320345b406a887498a0ab6b0e435b3ef5c244f5c193f82c8a61876853f3a6c1cf0932632d00c5f  linux-postmarketos-qcom-msm8953-v7.0.9-r0.tar.gz
+70af4eb4f7e96eefca255a62f91123bf008c07022b3a6bf76d8fcc69fdf71dd98b704a7c239071f709642404d4620a4e37655591353e4bb61f8345f24dab350e  config-postmarketos-qcom-msm8953.aarch64
+a2005751eab685ed877b288c87c6f1cf23cb2193e4cd6632467422a3583fcee351e62c9f42dd247465236e3989c46e672f4df93b307da8a943920c995302b720  0001-Add-PMI632-micro-USB-RID-diagnostics.patch
+1cec8fd07c40917c62c744e4d8dc64e84211dd4188cf18dd15d180dc7081f304be2b9bdbf4c8de4cddda8213933816684a6fe8e8ca0319cbe95d0d3c9349ebff  0002-Add-PMI632-automatic-USB-role-switching.patch
+7b554ab68d78cf52e2adba2ae28d2eb1863bebebeeae6c71ea2cf27277563bfd6f8ef8782b532a539633601de1d9e955ec750a95849fde677b4603816597f69a  0003-usb-dwc3-reset-onclite-core-before-host-exit.patch
+d9c089e061f323f5d78b50c6a70270060a1ddc2b90d0eac73cef4e832c29e58f844eac2300942fd0af91b119583fe8fcd89a4a4af8e919881792759e2527e112  0004-usb-qcom-power-onclite-VBUS-in-host-mode.patch
+4df1cadf724118c337984860cbb1707b466c46286c9900cb49d02f7f84cb02c3f7f64de56e0c2b8ac4c74ef82b1f6e133c032b60ad50478dd06fc0fd0821d87b  0005-usb-qcom-verify-fixed-onclite-VBUS-current.patch
+06e6f27abe108daf8a15683319166ddf6cf3f8c39415e96a440a92afb7f108d044a245fcd33b0f22d3c85e8cd796b10b9cc2e158fc69247e6ef42aba775fc35e  0006-usb-dwc3-reset-onclite-after-host-disconnect.patch
+3a034f893c554c59017c5c77bdb43f137faee76716a5d15f64ae700b8ea15bd1e6957661afe2ddd37cc184c5b2e23c23d3df78a6fdc2ff1a3fc95252b1e2cde7  0007-usb-xhci-quiesce-onclite-before-host-removal.patch
+6361d1ea226cad3d4826db9f4f034f3a9d387cdc596292af279c52cba0ad4f1688ea89846e679493f5bf84e4a7fcf323e2fa0bd64e6f802edad64be15e45127a  0008-usb-xhci-keep-onclite-reset-at-primary-stop.patch
+d78019103f5264ca5af7127946536d15dff3a5f820d27b2892b5b78f131176a71d180de0e606b67b355714c9c7f3a4aeada61132cdd239dff5790fa40044ca40  0009-usb-dwc3-reset-onclite-after-xHCI-removal.patch
+06ca6373eaa2754785135a1569d9952780103d037136fde7a1aac7a184b51f4f0f53e66f022a5ecb4d3fa1c2817077f6b9f9d9833b9adb382bd85023647cbfcc  0010-dt-bindings-usb-qcom-describe-PMI632-VBUS-fault-IRQs.patch
+19ca67ad912f16b074d5e7582376bffd2b0b4c95a58e6a847f2d183bb9f82fd1e8e6da840dd3a85e126c8c5568e76f1d89eb4c720efe063d53658894c42e78c3  0011-arm64-dts-qcom-onclite-add-VBUS-fault-IRQs.patch
+fe70e1c9c94dee8c56be252f90a955f14486b86e7ff156754492a8202e253286f7cf402f3c29e84cb9decd2efcfa44ad334aa4f6ec0126b0fcdcc560f8356858  0012-usb-qcom-fail-closed-on-PMI632-VBUS-faults.patch
+"

@@ -1,0 +1,82 @@
+From f8a1c9e30e534c5dd6e8799b4e4cd318feae1cd4 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sun, 6 Sep 2026 12:28:49 +0300
+Subject: [PATCH 08/12] usb: qcom: verify fixed onclite VBUS current
+
+The onclite regulator constraints fix the VBUS current at 500 mA. Regulator
+core applies that constraint during provider registration and intentionally
+rejects later current changes.
+
+Read back the programmed value at probe and before every enable instead.
+Continue only for exactly 500 mA so an unexpected value still fails closed
+before VBUS can be sourced.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/common/qcom-pmi632-micro-usb.c | 22 +++++-----------------
+ 1 file changed, 5 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/usb/common/qcom-pmi632-micro-usb.c b/drivers/usb/common/qcom-pmi632-micro-usb.c
+index 45d534d8e..4224919c2 100644
+--- a/drivers/usb/common/qcom-pmi632-micro-usb.c
++++ b/drivers/usb/common/qcom-pmi632-micro-usb.c
+@@ -162,27 +162,15 @@ static int pmi632_wait_role(struct pmi632_micro_usb *usb,
+ 	return -ETIMEDOUT;
+ }
+ 
+-static int pmi632_set_limit(struct pmi632_micro_usb *usb, const char *reason)
++static int pmi632_verify_limit(struct pmi632_micro_usb *usb, const char *reason)
+ {
+ 	int current_limit;
+-	int ret;
+-
+-	ret = regulator_set_current_limit(usb->vbus,
+-					  PMI632_VBUS_CURRENT_UA,
+-					  PMI632_VBUS_CURRENT_UA);
+-	if (ret) {
+-		dev_err(usb->dev,
+-			PMI632_RID_LOG_PREFIX
+-			"%s failed to set 500 mA VBUS limit: %pe\n",
+-			reason, ERR_PTR(ret));
+-		return ret;
+-	}
+ 
+ 	current_limit = regulator_get_current_limit(usb->vbus);
+ 	if (current_limit < 0) {
+ 		dev_err(usb->dev,
+ 			PMI632_RID_LOG_PREFIX
+-			"%s failed to verify VBUS current limit: %pe\n",
++			"%s failed to read VBUS current limit: %pe\n",
+ 			reason, ERR_PTR(current_limit));
+ 		return current_limit;
+ 	}
+@@ -195,7 +183,7 @@ static int pmi632_set_limit(struct pmi632_micro_usb *usb, const char *reason)
+ 	}
+ 
+ 	dev_info(usb->dev,
+-		 PMI632_RID_LOG_PREFIX "%s VBUS current limit %d uA\n",
++		 PMI632_RID_LOG_PREFIX "%s verified VBUS current limit %d uA\n",
+ 		 reason, current_limit);
+ 	return 0;
+ }
+@@ -248,7 +236,7 @@ static int pmi632_vbus_enable(struct pmi632_micro_usb *usb,
+ 	if (!usb->vbus || usb->vbus_enabled)
+ 		return 0;
+ 
+-	ret = pmi632_set_limit(usb, reason);
++	ret = pmi632_verify_limit(usb, reason);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -509,7 +497,7 @@ static int pmi632_vbus_init(struct pmi632_micro_usb *usb)
+ 				     PMI632_RID_LOG_PREFIX
+ 				     "VBUS unexpectedly enabled before probe\n");
+ 
+-	ret = pmi632_set_limit(usb, "probe");
++	ret = pmi632_verify_limit(usb, "probe");
+ 	if (ret)
+ 		return ret;
+ 
+-- 
+2.43.0
+

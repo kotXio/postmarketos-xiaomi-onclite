@@ -1,0 +1,106 @@
+From 1a0b56d764d7aeeab301953ffab6adf0740af9fe Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sat, 5 Sep 2026 21:12:24 +0300
+Subject: [PATCH] usb: dwc3: reset onclite core before host exit
+
+The onclite DWC3 integration does not acknowledge xHCI halt during a
+HOST-to-DEVICE role switch until the existing GCTL core reset runs.
+
+Move that single reset before host teardown for exact onclite and skip the
+later duplicate, so xHCI can halt before freeing its DMA state.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/dwc3/core.c | 53 ++++++++++++++++++++++++++++-------------
+ 1 file changed, 37 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index 0d3c7e7b2..a1e9bfcb8 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -162,6 +162,26 @@ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode, bool ignore_susphy)
+ }
+ EXPORT_SYMBOL_GPL(dwc3_set_prtcap);
+ 
++static void dwc3_gctl_core_soft_reset(struct dwc3 *dwc)
++{
++	u32 reg;
++
++	reg = dwc3_readl(dwc, DWC3_GCTL);
++	reg |= DWC3_GCTL_CORESOFTRESET;
++	dwc3_writel(dwc, DWC3_GCTL, reg);
++
++	/*
++	 * Wait for internal clocks to synchronize. DWC_usb31 and DWC_usb32
++	 * may need at least 50ms (less for DWC_usb3). Keep the existing
++	 * 100ms role-switch delay consistent across different IPs.
++	 */
++	msleep(100);
++
++	reg = dwc3_readl(dwc, DWC3_GCTL);
++	reg &= ~DWC3_GCTL_CORESOFTRESET;
++	dwc3_writel(dwc, DWC3_GCTL, reg);
++}
++
+ static void __dwc3_set_mode(struct work_struct *work)
+ {
+ 	struct dwc3 *dwc = work_to_dwc(work);
+@@ -169,6 +189,7 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	int ret;
+ 	u32 reg;
+ 	u32 desired_dr_role;
++	bool onclite_early_core_reset = false;
+ 	int i;
+ 
+ 	mutex_lock(&dwc->mutex);
+@@ -190,6 +211,19 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	if (desired_dr_role == DWC3_GCTL_PRTCAP_OTG && dwc->edev)
+ 		goto out;
+ 
++	/*
++	 * On onclite the xHCI controller does not acknowledge halt until the
++	 * DWC3 core reset is asserted. Move the existing role-switch reset
++	 * before xHCI unregister and skip its later duplicate.
++	 */
++	if (of_machine_is_compatible("xiaomi,onclite") &&
++	    dwc->current_dr_role == DWC3_GCTL_PRTCAP_HOST &&
++	    desired_dr_role == DWC3_GCTL_PRTCAP_DEVICE &&
++	    (DWC3_IP_IS(DWC3) || DWC3_VER_IS_PRIOR(DWC31, 190A))) {
++		onclite_early_core_reset = true;
++		dwc3_gctl_core_soft_reset(dwc);
++	}
++
+ 	switch (dwc->current_dr_role) {
+ 	case DWC3_GCTL_PRTCAP_HOST:
+ 		dwc3_host_exit(dwc);
+@@ -213,24 +247,11 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	 * When current_dr_role is not set, there's no role switching.
+ 	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
+ 	 */
+-	if (dwc->current_dr_role && ((DWC3_IP_IS(DWC3) ||
++	if (!onclite_early_core_reset && dwc->current_dr_role &&
++	    ((DWC3_IP_IS(DWC3) ||
+ 			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
+ 			desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
+-		reg = dwc3_readl(dwc, DWC3_GCTL);
+-		reg |= DWC3_GCTL_CORESOFTRESET;
+-		dwc3_writel(dwc, DWC3_GCTL, reg);
+-
+-		/*
+-		 * Wait for internal clocks to synchronized. DWC_usb31 and
+-		 * DWC_usb32 may need at least 50ms (less for DWC_usb3). To
+-		 * keep it consistent across different IPs, let's wait up to
+-		 * 100ms before clearing GCTL.CORESOFTRESET.
+-		 */
+-		msleep(100);
+-
+-		reg = dwc3_readl(dwc, DWC3_GCTL);
+-		reg &= ~DWC3_GCTL_CORESOFTRESET;
+-		dwc3_writel(dwc, DWC3_GCTL, reg);
++		dwc3_gctl_core_soft_reset(dwc);
+ 	}
+ 
+ 	spin_lock_irqsave(&dwc->lock, flags);
+-- 
+2.43.0
+

@@ -1,0 +1,205 @@
+From a09230269f313c271a0cb0729a065952a6b64745 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 11:49:23 +0300
+Subject: [PATCH 09/12] usb: qcom: make onclite host removal bounded
+
+Quiesce pending xHCI work before removal.
+
+Reset DWC3 only after both host controllers have been removed.
+
+Preserve v13 ordering without the rejected v10-v12 states.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/dwc3/core.c      | 30 ++++++++++++++++++------------
+ drivers/usb/dwc3/core.h      |  3 +++
+ drivers/usb/dwc3/host.c      | 21 +++++++++++++++++++++
+ drivers/usb/host/xhci-plat.c | 25 +++++++++++++++++++++++++
+ drivers/usb/host/xhci-plat.h |  1 +
+ 5 files changed, 68 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index a1e9bfcb8..6be54a3c5 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -189,7 +189,6 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	int ret;
+ 	u32 reg;
+ 	u32 desired_dr_role;
+-	bool onclite_early_core_reset = false;
+ 	int i;
+ 
+ 	mutex_lock(&dwc->mutex);
+@@ -197,6 +196,8 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	desired_dr_role = dwc->desired_dr_role;
+ 	spin_unlock_irqrestore(&dwc->lock, flags);
+ 
++	dwc->host_exit_cleanup_pending = false;
++
+ 	pm_runtime_get_sync(dwc->dev);
+ 
+ 	if (dwc->current_dr_role == DWC3_GCTL_PRTCAP_OTG)
+@@ -212,17 +213,15 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 		goto out;
+ 
+ 	/*
+-	 * On onclite the xHCI controller does not acknowledge halt until the
+-	 * DWC3 core reset is asserted. Move the existing role-switch reset
+-	 * before xHCI unregister and skip its later duplicate.
++	 * Complete pending onclite xHCI commands and URBs before HCD removal,
++	 * but leave the physical role-switch reset at its normal boundary after
++	 * synchronous host unregister has removed both HCDs.
+ 	 */
+ 	if (of_machine_is_compatible("xiaomi,onclite") &&
+ 	    dwc->current_dr_role == DWC3_GCTL_PRTCAP_HOST &&
+ 	    desired_dr_role == DWC3_GCTL_PRTCAP_DEVICE &&
+-	    (DWC3_IP_IS(DWC3) || DWC3_VER_IS_PRIOR(DWC31, 190A))) {
+-		onclite_early_core_reset = true;
+-		dwc3_gctl_core_soft_reset(dwc);
+-	}
++	    (DWC3_IP_IS(DWC3) || DWC3_VER_IS_PRIOR(DWC31, 190A)))
++		dwc->host_exit_cleanup_pending = true;
+ 
+ 	switch (dwc->current_dr_role) {
+ 	case DWC3_GCTL_PRTCAP_HOST:
+@@ -247,13 +246,20 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	 * When current_dr_role is not set, there's no role switching.
+ 	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
+ 	 */
+-	if (!onclite_early_core_reset && dwc->current_dr_role &&
+-	    ((DWC3_IP_IS(DWC3) ||
+-			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
+-			desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
++	if (dwc->current_dr_role &&
++	    ((DWC3_IP_IS(DWC3) || DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
++	     desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
++		if (dwc->host_exit_cleanup_pending)
++			dev_info(dwc->dev,
++				 "[onclite-usb-v13] resetting DWC3 after HCD removal\n");
+ 		dwc3_gctl_core_soft_reset(dwc);
++		if (dwc->host_exit_cleanup_pending)
++			dev_info(dwc->dev,
++				 "[onclite-usb-v13] post-HCD DWC3 reset complete\n");
+ 	}
+ 
++	dwc->host_exit_cleanup_pending = false;
++
+ 	spin_lock_irqsave(&dwc->lock, flags);
+ 
+ 	dwc3_set_prtcap(dwc, desired_dr_role, false);
+diff --git a/drivers/usb/dwc3/core.h b/drivers/usb/dwc3/core.h
+index a35b3db1f..9433012de 100644
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -1049,6 +1049,8 @@ struct dwc3_glue_ops {
+  * @dr_mode: requested mode of operation
+  * @current_dr_role: current role of operation when in dual-role mode
+  * @desired_dr_role: desired role of operation when in dual-role mode
++ * @host_exit_cleanup_pending: true when host teardown must complete pending
++ *		xHCI commands and URBs before HCD removal
+  * @edev: extcon handle
+  * @edev_nb: extcon notifier
+  * @hsphy_mode: UTMI phy mode, one of following:
+@@ -1239,6 +1241,7 @@ struct dwc3 {
+ 	enum usb_dr_mode	dr_mode;
+ 	u32			current_dr_role;
+ 	u32			desired_dr_role;
++	bool			host_exit_cleanup_pending;
+ 	struct extcon_dev	*edev;
+ 	struct notifier_block	edev_nb;
+ 	enum usb_phy_interface	hsphy_mode;
+diff --git a/drivers/usb/dwc3/host.c b/drivers/usb/dwc3/host.c
+index 96b588bd0..1c130258f 100644
+--- a/drivers/usb/dwc3/host.c
++++ b/drivers/usb/dwc3/host.c
+@@ -77,8 +77,29 @@ static void dwc3_xhci_plat_start(struct usb_hcd *hcd)
+ 	dwc3_enable_susphy(dwc, true);
+ }
+ 
++static bool dwc3_xhci_plat_prepare_remove(struct usb_hcd *hcd)
++{
++	struct platform_device *pdev;
++	struct dwc3 *dwc;
++
++	if (!usb_hcd_is_primary_hcd(hcd))
++		return false;
++
++	pdev = to_platform_device(hcd->self.controller);
++	dwc = dev_get_drvdata(pdev->dev.parent);
++
++	if (!of_machine_is_compatible("xiaomi,onclite") ||
++	    !dwc->host_exit_cleanup_pending)
++		return false;
++
++	dev_info(dwc->dev,
++		 "[onclite-usb-v13] controlled pre-remove xHCI cleanup requested\n");
++	return true;
++}
++
+ static const struct xhci_plat_priv dwc3_xhci_plat_quirk = {
+ 	.plat_start = dwc3_xhci_plat_start,
++	.plat_prepare_remove = dwc3_xhci_plat_prepare_remove,
+ };
+ 
+ static void dwc3_host_fill_xhci_irq_res(struct dwc3 *dwc,
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 074d9c731..e36fc3c70 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -45,6 +45,14 @@ static void xhci_priv_plat_start(struct usb_hcd *hcd)
+ 		priv->plat_start(hcd);
+ }
+ 
++static bool xhci_priv_plat_prepare_remove(struct usb_hcd *hcd)
++{
++	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
++
++	return priv->plat_prepare_remove &&
++		priv->plat_prepare_remove(hcd);
++}
++
+ static int xhci_priv_init_quirk(struct usb_hcd *hcd)
+ {
+ 	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
+@@ -440,9 +448,26 @@ void xhci_plat_remove(struct platform_device *dev)
+ 	struct clk *reg_clk = xhci->reg_clk;
+ 	struct usb_hcd *shared_hcd = xhci->shared_hcd;
+ 
++	/*
++	 * Some platform controllers need outstanding xHCI work completed and
++	 * their hardware stopped before the first root hub is disconnected.
++	 * Keep this opt-in: normal platform teardown remains unchanged.
++	 */
+ 	xhci->xhc_state |= XHCI_STATE_REMOVING;
+ 	pm_runtime_get_sync(&dev->dev);
+ 
++	if (xhci_priv_plat_prepare_remove(hcd)) {
++		unsigned long flags;
++
++		dev_info(&dev->dev,
++			 "[onclite-usb-v13] completing pending xHCI commands and URBs\n");
++		spin_lock_irqsave(&xhci->lock, flags);
++		xhci_hc_died(xhci);
++		spin_unlock_irqrestore(&xhci->lock, flags);
++		dev_info(&dev->dev,
++			 "[onclite-usb-v13] pending xHCI work completed\n");
++	}
++
+ 	if (shared_hcd) {
+ 		usb_remove_hcd(shared_hcd);
+ 		xhci->shared_hcd = NULL;
+diff --git a/drivers/usb/host/xhci-plat.h b/drivers/usb/host/xhci-plat.h
+index 00751d851..6b296eda7 100644
+--- a/drivers/usb/host/xhci-plat.h
++++ b/drivers/usb/host/xhci-plat.h
+@@ -18,6 +18,7 @@ struct xhci_plat_priv {
+ 	bool power_lost;
+ 	unsigned sideband_at_suspend:1;
+ 	void (*plat_start)(struct usb_hcd *);
++	bool (*plat_prepare_remove)(struct usb_hcd *hcd);
+ 	int (*init_quirk)(struct usb_hcd *);
+ 	int (*suspend_quirk)(struct usb_hcd *);
+ 	int (*resume_quirk)(struct usb_hcd *);
+-- 
+2.43.0
+

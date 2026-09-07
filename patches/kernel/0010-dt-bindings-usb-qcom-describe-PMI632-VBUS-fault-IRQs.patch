@@ -1,0 +1,67 @@
+From 926ed763238b80f6364b3564503baef306f42f27 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 09:29:21 +0300
+Subject: [PATCH 10/12] dt-bindings: usb: qcom: describe PMI632 VBUS fault IRQs
+
+Document the three PMI632 DCDC fault IRQs required when a board
+supplies VBUS. Keep the single RID-only form for boards without a
+VBUS supply.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../bindings/usb/qcom,pmi632-micro-usb.yaml   | 21 +++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml b/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml
+index 4a77dafc2..85b80fd7f 100644
+--- a/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml
++++ b/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml
+@@ -14,7 +14,8 @@ description:
+   micro-USB connector. In that mode its RID status and interrupt report
+   whether the ID pin is grounded. The driver uses that state to select the
+   USB controller role. VBUS is optional and remains disabled when the supply
+-  is absent from the board description.
++  is absent from the board description. Boards that provide VBUS also provide
++  the PMI632 DCDC fault interrupts so the driver can fail closed.
+ 
+ properties:
+   compatible:
+@@ -24,11 +25,16 @@ properties:
+     maxItems: 1
+ 
+   interrupts:
+-    maxItems: 1
++    minItems: 1
++    maxItems: 4
+ 
+   interrupt-names:
++    minItems: 1
+     items:
+       - const: or-rid-detect-change
++      - const: otg-fail
++      - const: otg-oc-disable-sw
++      - const: otg-oc-hiccup
+ 
+   connector:
+     type: object
+@@ -45,6 +51,17 @@ required:
+   - interrupt-names
+   - connector
+ 
++allOf:
++  - if:
++      required:
++        - vdd-vbus-supply
++    then:
++      properties:
++        interrupts:
++          minItems: 4
++        interrupt-names:
++          minItems: 4
++
+ additionalProperties: false
+ 
+ examples:
+-- 
+2.43.0
+

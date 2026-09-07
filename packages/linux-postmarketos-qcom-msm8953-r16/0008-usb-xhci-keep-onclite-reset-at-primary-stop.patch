@@ -1,0 +1,30 @@
+From cd1dd20740e492dc0ee9ec0adff0bf42bde3664a Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sun, 6 Sep 2026 18:32:18 +0300
+Subject: [PATCH] usb: xhci: keep onclite reset at primary stop
+
+Keep controlled xHCI logical-death cleanup before shared-HCD removal, but
+defer the DWC3 physical reset to the existing primary-HCD stop callback.
+This isolates whether the early reset caused the long primary xhci_stop()
+MMIO stall seen with a loaded RTL8152 hub on v11.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/host/xhci-plat.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 326fa7546..02b7cd13c 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -483,7 +483,6 @@ void xhci_plat_remove(struct platform_device *dev)
+ 		spin_unlock_irqrestore(&xhci->lock, flags);
+ 		dev_info(&dev->dev,
+ 			 "[onclite-usb-v11] pending xHCI work completed\n");
+-		xhci_priv_plat_stop(hcd);
+ 	}
+ 
+ 	if (shared_hcd) {
+-- 
+2.43.0
+

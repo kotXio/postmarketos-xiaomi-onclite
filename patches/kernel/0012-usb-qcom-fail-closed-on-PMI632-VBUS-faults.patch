@@ -1,0 +1,396 @@
+From 2a00c7d9d9eb3b2f620b2375eddf9e6a4717e77e Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 09:29:22 +0300
+Subject: [PATCH 12/12] usb: qcom: fail closed on PMI632 VBUS faults
+
+Latch VBUS faults in hard IRQ context and force boost off with readback
+in the threaded IRQ. Serialize regulator and role recovery, then block
+HOST until RID release.
+
+Keep fault handling in the opt-in driver and preserve generic regulator
+and charging code.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/usb/common/qcom-pmi632-micro-usb.c | 254 ++++++++++++++++++++-
+ 1 file changed, 250 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/common/qcom-pmi632-micro-usb.c b/drivers/usb/common/qcom-pmi632-micro-usb.c
+index 4224919c2..20d969655 100644
+--- a/drivers/usb/common/qcom-pmi632-micro-usb.c
++++ b/drivers/usb/common/qcom-pmi632-micro-usb.c
+@@ -2,7 +2,9 @@
+ /*
+  * Qualcomm PMI632 micro-USB role detector
+  *
+- * VBUS is optional and is always disabled before leaving host role.
++ * VBUS is optional and is always disabled before leaving host role. Supplied
++ * boards also use the PMI632 DCDC fault IRQs to force VBUS off and latch the
++ * controller in device role until the offending attachment is removed.
+  */
+ 
+ #include <linux/atomic.h>
+@@ -11,6 +13,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/irq.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/property.h>
+@@ -38,6 +41,30 @@
+ #define PMI632_ROLE_TIMEOUT_MS			1000
+ #define PMI632_VBUS_CURRENT_UA			500000
+ #define PMI632_RID_LOG_PREFIX			"[pmi632-vbus-v7] "
++#define PMI632_FAULT_LOG_PREFIX			"[pmi632-vbus-v14] "
++
++enum pmi632_vbus_fault_id {
++	PMI632_VBUS_FAULT_OTG_FAIL,
++	PMI632_VBUS_FAULT_OC_DISABLE_SW,
++	PMI632_VBUS_FAULT_OC_HICCUP,
++	PMI632_VBUS_FAULT_COUNT,
++};
++
++struct pmi632_micro_usb;
++
++struct pmi632_vbus_fault_irq {
++	struct pmi632_micro_usb *usb;
++	const char *name;
++	enum pmi632_vbus_fault_id id;
++	atomic_t count;
++	int irq;
++};
++
++static const char *const pmi632_vbus_fault_names[PMI632_VBUS_FAULT_COUNT] = {
++	[PMI632_VBUS_FAULT_OTG_FAIL] = "otg-fail",
++	[PMI632_VBUS_FAULT_OC_DISABLE_SW] = "otg-oc-disable-sw",
++	[PMI632_VBUS_FAULT_OC_HICCUP] = "otg-oc-hiccup",
++};
+ 
+ struct pmi632_rid_state {
+ 	unsigned int misc;
+@@ -52,14 +79,21 @@ struct pmi632_micro_usb {
+ 	struct device *dev;
+ 	struct regmap *regmap;
+ 	struct delayed_work rid_work;
++	/* Serializes role and regulator transitions. */
++	struct mutex role_lock;
+ 	atomic_t irq_count;
++	atomic_t fault_latched;
++	atomic_t fault_pending;
+ 	u32 base;
+ 	struct usb_role_switch *role_sw;
+ 	struct regulator *vbus;
++	struct pmi632_vbus_fault_irq faults[PMI632_VBUS_FAULT_COUNT];
+ 	int rid_irq;
++	unsigned int fault_irqs_requested;
+ 	unsigned int saved_irq_enable_2;
+ 	enum usb_role last_role;
+ 	bool irq_disabled;
++	bool fault_irqs_disabled;
+ 	bool irq_gate_touched;
+ 	bool irq_gate_restored;
+ 	bool vbus_enabled;
+@@ -188,6 +222,44 @@ static int pmi632_verify_limit(struct pmi632_micro_usb *usb, const char *reason)
+ 	return 0;
+ }
+ 
++static int pmi632_force_vbus_off(struct pmi632_micro_usb *usb,
++				 const char *reason)
++{
++	unsigned int otg_cmd;
++	int ret;
++
++	ret = regmap_update_bits(usb->regmap, PMI632_OTG_CMD_REG,
++				 PMI632_OTG_EN, 0);
++	if (ret) {
++		dev_crit(usb->dev,
++			 PMI632_FAULT_LOG_PREFIX
++			 "%s failed to force VBUS off: %pe\n",
++			 reason, ERR_PTR(ret));
++		return ret;
++	}
++
++	ret = regmap_read(usb->regmap, PMI632_OTG_CMD_REG, &otg_cmd);
++	if (ret) {
++		dev_crit(usb->dev,
++			 PMI632_FAULT_LOG_PREFIX
++			 "%s failed to verify forced VBUS off: %pe\n",
++			 reason, ERR_PTR(ret));
++		return ret;
++	}
++	if (otg_cmd & PMI632_OTG_EN) {
++		dev_crit(usb->dev,
++			 PMI632_FAULT_LOG_PREFIX
++			 "%s VBUS remained on after emergency disable: 1140=%#04x\n",
++			 reason, otg_cmd);
++		return -EIO;
++	}
++
++	dev_err(usb->dev,
++		PMI632_FAULT_LOG_PREFIX "%s forced VBUS off; 1140=%#04x\n",
++		reason, otg_cmd);
++	return 0;
++}
++
+ static int pmi632_vbus_disable(struct pmi632_micro_usb *usb,
+ 			       const char *reason)
+ {
+@@ -235,10 +307,23 @@ static int pmi632_vbus_enable(struct pmi632_micro_usb *usb,
+ 
+ 	if (!usb->vbus || usb->vbus_enabled)
+ 		return 0;
++	if (atomic_read(&usb->fault_latched)) {
++		dev_err(usb->dev,
++			PMI632_FAULT_LOG_PREFIX
++			"%s refusing VBUS enable while fault is latched\n",
++			reason);
++		return -EIO;
++	}
+ 
+ 	ret = pmi632_verify_limit(usb, reason);
+ 	if (ret)
+ 		return ret;
++	if (atomic_read(&usb->fault_latched)) {
++		dev_err(usb->dev,
++			PMI632_FAULT_LOG_PREFIX
++			"%s fault latched during VBUS preflight\n", reason);
++		return -EIO;
++	}
+ 
+ 	ret = regulator_enable(usb->vbus);
+ 	if (ret) {
+@@ -248,6 +333,14 @@ static int pmi632_vbus_enable(struct pmi632_micro_usb *usb,
+ 		return ret;
+ 	}
+ 	usb->vbus_enabled = true;
++	if (atomic_read(&usb->fault_latched)) {
++		dev_err(usb->dev,
++			PMI632_FAULT_LOG_PREFIX
++			"%s fault raced VBUS enable; disabling immediately\n",
++			reason);
++		ret = pmi632_vbus_disable(usb, "fault-raced-enable");
++		return ret ? ret : -EIO;
++	}
+ 
+ 	enabled = regulator_is_enabled(usb->vbus);
+ 	if (enabled > 0) {
+@@ -308,8 +401,8 @@ static void pmi632_fail_to_device(struct pmi632_micro_usb *usb,
+ 		 "%s restored device role with VBUS off\n", reason);
+ }
+ 
+-static int pmi632_role_set(struct pmi632_micro_usb *usb,
+-			   enum usb_role role, const char *reason)
++static int __pmi632_role_set(struct pmi632_micro_usb *usb,
++			     enum usb_role role, const char *reason)
+ {
+ 	int ret;
+ 
+@@ -380,6 +473,18 @@ static int pmi632_role_set(struct pmi632_micro_usb *usb,
+ 	return 0;
+ }
+ 
++static int pmi632_role_set(struct pmi632_micro_usb *usb,
++			   enum usb_role role, const char *reason)
++{
++	int ret;
++
++	mutex_lock(&usb->role_lock);
++	ret = __pmi632_role_set(usb, role, reason);
++	mutex_unlock(&usb->role_lock);
++
++	return ret;
++}
++
+ static int pmi632_role_apply_state(struct pmi632_micro_usb *usb,
+ 				   const struct pmi632_rid_state *state,
+ 				   const char *reason)
+@@ -396,6 +501,10 @@ static void pmi632_rid_work(struct work_struct *work)
+ 		container_of(to_delayed_work(work), struct pmi632_micro_usb,
+ 			     rid_work);
+ 	struct pmi632_rid_state state;
++	unsigned int pending;
++	bool rid_grounded;
++	int off_ret;
++	int ret;
+ 
+ 	if (pmi632_rid_read_state(usb, &state)) {
+ 		pmi632_role_set(usb, USB_ROLE_DEVICE, "state-read-failure");
+@@ -403,7 +512,50 @@ static void pmi632_rid_work(struct work_struct *work)
+ 	}
+ 
+ 	pmi632_rid_report_state(usb, &state, "debounced-irq");
+-	pmi632_role_apply_state(usb, &state, "debounced-irq");
++	if (!atomic_read(&usb->fault_latched)) {
++		pmi632_role_apply_state(usb, &state, "debounced-irq");
++		return;
++	}
++
++	pending = atomic_xchg(&usb->fault_pending, 0);
++	rid_grounded = state.u_usb & PMI632_U_USB_GROUND_NOVBUS;
++	dev_err(usb->dev,
++		PMI632_FAULT_LOG_PREFIX
++		"recovering pending=%#x counts=%d/%d/%d rid_grounded=%u\n",
++		pending,
++		atomic_read(&usb->faults[PMI632_VBUS_FAULT_OTG_FAIL].count),
++		atomic_read(&usb->faults[PMI632_VBUS_FAULT_OC_DISABLE_SW].count),
++		atomic_read(&usb->faults[PMI632_VBUS_FAULT_OC_HICCUP].count),
++		rid_grounded);
++
++	off_ret = pmi632_force_vbus_off(usb, "fault-recovery");
++	ret = pmi632_role_set(usb, USB_ROLE_DEVICE, "vbus-fault");
++	if (!ret)
++		off_ret = pmi632_force_vbus_off(usb, "fault-recovery-final");
++	if (ret || off_ret) {
++		dev_crit(usb->dev,
++			 PMI632_FAULT_LOG_PREFIX
++			 "failed to reach DEVICE with VBUS off: role=%d off=%d; latch retained\n",
++			 ret, off_ret);
++		return;
++	}
++
++	if (rid_grounded) {
++		dev_err(usb->dev,
++			PMI632_FAULT_LOG_PREFIX
++			"DEVICE/off recovered; HOST blocked until RID release\n");
++		return;
++	}
++
++	if (atomic_read(&usb->fault_pending)) {
++		mod_delayed_work(system_power_efficient_wq, &usb->rid_work, 0);
++		return;
++	}
++
++	atomic_set(&usb->fault_latched, 0);
++	dev_info(usb->dev,
++		 PMI632_FAULT_LOG_PREFIX
++		 "fault latch cleared after RID release; next attach may enter HOST\n");
+ }
+ 
+ static irqreturn_t pmi632_rid_irq(int irq, void *data)
+@@ -417,6 +569,85 @@ static irqreturn_t pmi632_rid_irq(int irq, void *data)
+ 	return IRQ_HANDLED;
+ }
+ 
++static irqreturn_t pmi632_vbus_fault_irq(int irq, void *data)
++{
++	struct pmi632_vbus_fault_irq *fault = data;
++	struct pmi632_micro_usb *usb = fault->usb;
++
++	atomic_set(&usb->fault_latched, 1);
++	atomic_or(BIT(fault->id), &usb->fault_pending);
++	atomic_inc(&fault->count);
++
++	return IRQ_WAKE_THREAD;
++}
++
++static irqreturn_t pmi632_vbus_fault_thread(int irq, void *data)
++{
++	struct pmi632_vbus_fault_irq *fault = data;
++	struct pmi632_micro_usb *usb = fault->usb;
++
++	dev_err(usb->dev,
++		PMI632_FAULT_LOG_PREFIX "fault=%s count=%d triggered\n",
++		fault->name, atomic_read(&fault->count));
++	pmi632_force_vbus_off(usb, "fault-irq");
++
++	mod_delayed_work(system_power_efficient_wq, &usb->rid_work, 0);
++
++	return IRQ_HANDLED;
++}
++
++static int pmi632_request_vbus_fault_irqs(struct platform_device *pdev,
++					  struct pmi632_micro_usb *usb)
++{
++	struct device *dev = &pdev->dev;
++	struct pmi632_vbus_fault_irq *fault;
++	unsigned int trigger;
++	unsigned int i;
++	int ret;
++
++	if (!usb->vbus)
++		return 0;
++
++	for (i = 0; i < PMI632_VBUS_FAULT_COUNT; i++) {
++		fault = &usb->faults[i];
++		fault->usb = usb;
++		fault->name = pmi632_vbus_fault_names[i];
++		fault->id = i;
++		atomic_set(&fault->count, 0);
++
++		fault->irq = platform_get_irq_byname(pdev, fault->name);
++		if (fault->irq < 0)
++			return dev_err_probe(dev, fault->irq,
++					     PMI632_FAULT_LOG_PREFIX
++					     "failed to get %s IRQ\n", fault->name);
++
++		trigger = irq_get_trigger_type(fault->irq) & IRQ_TYPE_SENSE_MASK;
++		if (trigger != IRQ_TYPE_EDGE_RISING)
++			return dev_err_probe(dev, -EINVAL,
++					     PMI632_FAULT_LOG_PREFIX
++					     "%s IRQ is not rising-edge: %#x\n",
++					     fault->name, trigger);
++
++		ret = devm_request_threaded_irq(dev, fault->irq,
++						pmi632_vbus_fault_irq,
++						pmi632_vbus_fault_thread,
++						IRQF_ONESHOT, fault->name, fault);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     PMI632_FAULT_LOG_PREFIX
++					     "failed to request %s IRQ\n",
++					     fault->name);
++
++		usb->fault_irqs_requested++;
++		dev_info(dev,
++			 PMI632_FAULT_LOG_PREFIX
++			 "registered fault=%s irq=%d count=0\n",
++			 fault->name, fault->irq);
++	}
++
++	return 0;
++}
++
+ static void pmi632_rid_restore_irq_gate(struct pmi632_micro_usb *usb)
+ {
+ 	unsigned int value;
+@@ -454,6 +685,14 @@ static void pmi632_role_restore_device(struct pmi632_micro_usb *usb,
+ 
+ static void pmi632_rid_quiesce(struct pmi632_micro_usb *usb)
+ {
++	unsigned int i;
++
++	if (!usb->fault_irqs_disabled) {
++		for (i = 0; i < usb->fault_irqs_requested; i++)
++			disable_irq(usb->faults[i].irq);
++		usb->fault_irqs_disabled = true;
++	}
++
+ 	if (!usb->irq_disabled) {
+ 		disable_irq(usb->rid_irq);
+ 		usb->irq_disabled = true;
+@@ -546,7 +785,10 @@ static int pmi632_micro_usb_probe(struct platform_device *pdev)
+ 				     trigger);
+ 
+ 	INIT_DELAYED_WORK(&usb->rid_work, pmi632_rid_work);
++	mutex_init(&usb->role_lock);
+ 	atomic_set(&usb->irq_count, 0);
++	atomic_set(&usb->fault_latched, 0);
++	atomic_set(&usb->fault_pending, 0);
+ 
+ 	ret = pmi632_rid_read_state(usb, &state);
+ 	if (ret)
+@@ -590,6 +832,10 @@ static int pmi632_micro_usb_probe(struct platform_device *pdev)
+ 		goto err_put_role_sw;
+ 	}
+ 
++	ret = pmi632_request_vbus_fault_irqs(pdev, usb);
++	if (ret)
++		goto err_quiesce;
++
+ 	ret = regmap_update_bits(usb->regmap,
+ 				 usb->base + PMI632_TYPEC_INTERRUPT_EN_CFG_2,
+ 				 PMI632_MICRO_USB_STATE_CHANGE_INT_EN,
+-- 
+2.43.0
+

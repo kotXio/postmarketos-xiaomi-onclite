@@ -1,0 +1,38 @@
+From 1cbae9853636c9e688bbc28c1e0a87574d3aff50 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 09:29:21 +0300
+Subject: [PATCH 11/12] arm64: dts: qcom: onclite: add VBUS fault IRQs
+
+Wire onclite's OTG failure and two over-current signals using the exact
+PMI632 DCDC peripheral 0x11 interrupt bits. Keep RID on the Type-C
+peripheral 0x15.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+index 5d5882b04..cb24075b0 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+@@ -323,8 +323,14 @@ pm8953_l23: l23 {
+ 
+ &pmi632_typec {
+ 	compatible = "qcom,pmi632-micro-usb";
+-	interrupts = <0x2 0x15 0x0 IRQ_TYPE_EDGE_BOTH>;
+-	interrupt-names = "or-rid-detect-change";
++	interrupts = <0x2 0x15 0x0 IRQ_TYPE_EDGE_BOTH>,
++		     <0x2 0x11 0x0 IRQ_TYPE_EDGE_RISING>,
++		     <0x2 0x11 0x1 IRQ_TYPE_EDGE_RISING>,
++		     <0x2 0x11 0x2 IRQ_TYPE_EDGE_RISING>;
++	interrupt-names = "or-rid-detect-change",
++			  "otg-fail",
++			  "otg-oc-disable-sw",
++			  "otg-oc-hiccup";
+ 	status = "okay";
+ 
+ 	connector {
+-- 
+2.43.0
+

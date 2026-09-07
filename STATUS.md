@@ -1,12 +1,11 @@
 # Device status
 
-Last updated: 2026-09-05
+Last updated: 2026-09-07
 
 Tested on one Xiaomi Redmi 7 (`onclite`), `aarch64`, with postmarketOS
-`v26.06`, Plasma Mobile and Linux `7.0.9-msm8953`.
-
-A visible driver or API is not classified as working until its end-to-end path
-has been exercised on the handset.
+`v26.06`, Plasma Mobile and Linux `7.0.9-msm8953`. The USB OTG configuration
+uses persistent kernel package `7.0.9-r16`, tethering package `51-r2` and
+onclite gadget-lifecycle package `1-r0`.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -14,14 +13,14 @@ has been exercised on the handset.
 | Display and GPU | Working | `720x1520@60`; Mesa Freedreno reports Adreno 506 (`FD506`) OpenGL ES hardware rendering. |
 | Touch | Working | Physical interaction verified. |
 | Wi-Fi | Working | 2.4 GHz connectivity and SSH verified. |
-| USB networking | Working | USB 2.0 high-speed NCM gadget networking verified. |
-| USB OTG | Not working | Automatic host-role selection and phone-sourced VBUS are unavailable in the current postmarketOS port. |
+| USB networking | Working | USB 2.0 high-speed NCM and same-boot recovery after HOST mode verified. |
+| USB OTG | Working | Automatic role switching, `500 mA` VBUS, an empty adapter and a bus-powered RTL8152 hub were tested. Kernel r16 is installed and boots normally. |
 | Indicator LED | Working | Physical output test passed. |
 | Vibration | Working | Physical output test passed. |
-| Bluetooth | Partial | Controller is powered and exposed; a complete device connection and audio test is pending. |
+| Bluetooth | Partial | Controller is powered and exposed; device connection and Bluetooth audio have not been tested. |
 | Cellular modem | Partial | Modem control and radio visibility work; calls, SMS and mobile data are unverified. |
 | GNSS | Unverified | ModemManager exposes GPS capabilities; no position fix has been verified. |
-| Earpiece and microphones | Unverified | ALSA/UCM routes exist, but physical playback and capture tests are pending. |
+| Earpiece and microphones | Unverified | ALSA/UCM routes exist; physical playback and recording have not been tested. |
 | Bottom speaker | Not working | The external AW87329 amplifier is unsupported by the current mainline port. |
 | Hardware video codec | Partial | Qualcomm Venus decoder/encoder V4L2 nodes exist; frame decode and encode are unverified. |
 | Battery and charging | Not working | The current mainline port exposes no battery or charger power-supply device. |
@@ -37,5 +36,5 @@ has been exercised on the handset.
 - **Working:** physically verified on the test handset.
 - **Partial:** part of the subsystem works, but integration or end-to-end
   validation is incomplete.
-- **Unverified:** exposed or expected, but not yet physically proven.
+- **Unverified:** exposed or expected, but not physically tested.
 - **Not working:** currently unavailable or known to fail.
