@@ -29,6 +29,15 @@ The logically split review series produces the same kernel source tree.
   [DWC3 host glue](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/usb/dwc3/host.c) and
   [xHCI platform driver](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/usb/host/xhci-plat.c)
   defined the target kernel behavior.
+- Linux's
+  [USB role-switch framework](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/usb/roles/class.c),
+  [configfs USB gadget](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/usb/gadget/configfs.c) and
+  [NCM gadget function](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/usb/gadget/function/f_ncm.c)
+  provided the existing role and USB-networking infrastructure.
+- The existing Linux
+  [RTL8152 driver](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/net/usb/r8152.c)
+  supported the USB Ethernet adapter used during physical validation; it is
+  not part of this project's implementation.
 - The existing Qualcomm
   [PMIC USB VBUS regulator](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/drivers/regulator/qcom_usb_vbus-regulator.c),
   [PMIC Type-C binding](https://github.com/msm8953-mainline/linux/blob/v7.0.9-r0/Documentation/devicetree/bindings/usb/qcom,pmic-typec.yaml)

@@ -7,17 +7,23 @@ PMI632 RID signal. In HOST it supplies VBUS at an exact `500 mA` limit. On
 adapter removal it tears down xHCI within a bounded path, returns to DEVICE and
 restores the existing NCM gadget without rebooting.
 
-## Components
+## Existing Linux building blocks
 
-- An opt-in `xiaomi,onclite` kernel driver reads and debounces PMI632 RID,
-  controls the DWC3 role and enables VBUS only after HOST is active.
-- DWC3/xHCI changes make onclite host removal deterministic without changing
-  other boards.
-- Three PMI632 DCDC fault interrupts force VBUS off and block HOST until the
-  attachment is removed.
-- A small onclite-only udev helper restores the configfs gadget in DEVICE mode.
-- The NetworkManager dispatcher rechecks the role after its intentional delay
-  and does not race a transition to HOST.
+The implementation uses the existing Linux DWC3 and xHCI drivers, USB
+role-switch framework, Qualcomm USB VBUS regulator and configfs NCM gadget.
+The existing RTL8152 driver was used for the tested USB Ethernet adapter.
+
+## What this project adds
+
+- A new `drivers/usb/common/qcom-pmi632-micro-usb.c` driver for the PMI632 RID
+  detector.
+- Device-tree binding and `onclite` DTS integration for RID and fault IRQs.
+- Automatic switching between DEVICE and HOST roles.
+- VBUS control with a verified `500 mA` current limit.
+- Fail-closed handling of all three PMI632 DCDC fault interrupts.
+- Bounded DWC3/xHCI teardown when leaving HOST mode.
+- An onclite userspace lifecycle helper that restores the NCM gadget.
+- A NetworkManager tethering fix that prevents a delayed rebind race.
 
 ## Physical validation
 
