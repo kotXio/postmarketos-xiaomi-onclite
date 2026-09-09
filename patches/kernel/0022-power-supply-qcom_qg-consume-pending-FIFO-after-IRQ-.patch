@@ -1,0 +1,256 @@
+From 5705d6cfd81379dc2d659c8801159ab965dba519 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 17:39:58 +0300
+Subject: [PATCH 10/16] power: supply: qcom_qg: consume pending FIFO after IRQ
+ setup
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/power/supply/qcom_qg.c | 147 ++++++++++++++++++++++++++++++---
+ 1 file changed, 135 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_qg.c b/drivers/power/supply/qcom_qg.c
+index 955bd378f8ac5..4302c0c547b03 100644
+--- a/drivers/power/supply/qcom_qg.c
++++ b/drivers/power/supply/qcom_qg.c
+@@ -40,6 +40,9 @@
+ #define QG_STATUS3			0x0A
+ #define  QG_STATUS3_FIFO_RT_COUNT	GENMASK(3, 0)
+ 
++#define QG_INT_RT_STS			0x10
++#define QG_INT_LATCHED_STS		0x18
++
+ /* Data control */
+ #define QG_DATA_CTL1			0x41
+ #define  QG_DATA_CTL1_MASTER_HOLD	BIT(0)
+@@ -49,6 +52,7 @@
+ #define  QG_S2_FIFO_LENGTH_MASK		GENMASK(5, 3)
+ #define  QG_S2_FIFO_LENGTH_SHIFT	3
+ #define  QG_S2_NUM_ACCUM_MASK		GENMASK(2, 0)
++#define QG_S2_NORMAL_MEAS_CTL3		0x52
+ 
+ /* Normal average data registers (16-bit little-endian) */
+ #define QG_S2_NORMAL_AVG_V		0x80
+@@ -103,6 +107,8 @@ struct qcom_qg {
+ 	unsigned int ocv_uv;
+ 	time64_t ocv_time;
+ 	bool batt_present;
++	bool fifo_data_valid;
++	bool fifo_irq_logged;
+ };
+ 
+ /* --- Low-level register helpers --- */
+@@ -227,23 +233,28 @@ static int qg_read_temperature(struct qcom_qg *qg, int *temp_decidegc)
+ }
+ 
+ /**
+- * qg_read_fifo_vbat() - Read voltage samples from the hardware FIFO.
++ * qg_read_fifo() - Read voltage and current samples from the hardware FIFO.
+  * @qg: QGauge instance
++ * @fifo_count_out: number of FIFO entries reported by the hardware
++ * @valid_out: number of complete voltage/current pairs consumed
+  *
+  * Asserts master hold, reads available FIFO entries, averages them,
+- * and stores the result. This gives a better voltage estimate than
+- * the single last-ADC register.
++ * and stores the results. Releasing master hold restarts FIFO collection.
+  */
+-static int qg_read_fifo_vbat(struct qcom_qg *qg)
++static int qg_read_fifo(struct qcom_qg *qg, unsigned int *fifo_count_out,
++			unsigned int *valid_out)
+ {
+ 	unsigned int count_reg;
+ 	unsigned int fifo_count;
+ 	u64 vbat_sum = 0;
++	s64 ibat_sum = 0;
+ 	unsigned int valid = 0;
+-	u16 raw;
++	u16 iraw, vraw;
+ 	int release_ret;
+ 	int ret, i;
+ 
++	*fifo_count_out = 0;
++	*valid_out = 0;
+ 	guard(mutex)(&qg->lock);
+ 
+ 	ret = qg_master_hold(qg, true);
+@@ -257,21 +268,31 @@ static int qg_read_fifo_vbat(struct qcom_qg *qg)
+ 	fifo_count = count_reg & QG_STATUS3_FIFO_RT_COUNT;
+ 	if (fifo_count > QG_MAX_FIFO_LENGTH)
+ 		fifo_count = QG_MAX_FIFO_LENGTH;
++	*fifo_count_out = fifo_count;
+ 
+ 	for (i = 0; i < fifo_count; i++) {
+-		ret = qg_read16(qg, QG_V_FIFO0 + i * 2, &raw);
++		ret = qg_read16(qg, QG_V_FIFO0 + i * 2, &vraw);
++		if (ret)
++			goto release;
++
++		ret = qg_read16(qg, QG_I_FIFO0 + i * 2, &iraw);
+ 		if (ret)
+ 			goto release;
+ 
+-		if (raw == QG_FIFO_RESET_VAL)
++		if (vraw == QG_FIFO_RESET_VAL || iraw == QG_FIFO_RESET_VAL)
+ 			continue;
+ 
+-		vbat_sum += QG_V_RAW_TO_UV(raw);
++		vbat_sum += QG_V_RAW_TO_UV(vraw);
++		ibat_sum -= QG_I_RAW_TO_UA(sign_extend32(iraw, 15));
+ 		valid++;
+ 	}
+ 
+-	if (valid)
++	if (valid) {
+ 		qg->vbat_uv = div_u64(vbat_sum, valid);
++		qg->ibat_ua = div_s64(ibat_sum, valid);
++		qg->fifo_data_valid = true;
++	}
++	*valid_out = valid;
+ 
+ release:
+ 	release_ret = qg_master_hold(qg, false);
+@@ -281,6 +302,76 @@ static int qg_read_fifo_vbat(struct qcom_qg *qg)
+ 	return ret;
+ }
+ 
++static int qg_read_fifo_state(struct qcom_qg *qg, unsigned int *fifo_count,
++			      unsigned int *irq_rt,
++			      unsigned int *irq_latched,
++			      unsigned int *ctl2, unsigned int *ctl3)
++{
++	unsigned int status3;
++	int ret;
++
++	ret = regmap_read(qg->regmap, qg->base + QG_STATUS3, &status3);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, qg->base + QG_INT_RT_STS, irq_rt);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, qg->base + QG_INT_LATCHED_STS,
++			  irq_latched);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, qg->base + QG_S2_NORMAL_MEAS_CTL2,
++			  ctl2);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, qg->base + QG_S2_NORMAL_MEAS_CTL3,
++			  ctl3);
++	if (ret)
++		return ret;
++
++	*fifo_count = status3 & QG_STATUS3_FIFO_RT_COUNT;
++	return 0;
++}
++
++static int qg_process_pending_fifo(struct qcom_qg *qg)
++{
++	unsigned int fifo_count, irq_rt, irq_latched, ctl2, ctl3;
++	unsigned int processed_count, valid;
++	int ret;
++
++	ret = qg_read_fifo_state(qg, &fifo_count, &irq_rt, &irq_latched,
++				 &ctl2, &ctl3);
++	if (ret)
++		return ret;
++
++	dev_info(qg->dev,
++		 "[QG-V3] pending before: fifo=%u rt=0x%02x latched=0x%02x ctl2=0x%02x ctl3=0x%02x\n",
++		 fifo_count, irq_rt, irq_latched, ctl2, ctl3);
++
++	if (!fifo_count)
++		return 0;
++
++	ret = qg_read_fifo(qg, &processed_count, &valid);
++	if (ret)
++		return ret;
++
++	ret = qg_read_fifo_state(qg, &fifo_count, &irq_rt, &irq_latched,
++				 &ctl2, &ctl3);
++	if (ret)
++		return ret;
++
++	dev_info(qg->dev,
++		 "[QG-V3] pending consumed: reported=%u valid=%u fifo_after=%u rt=0x%02x latched=0x%02x ctl2=0x%02x ctl3=0x%02x vbat=%u uV ibat=%d uA\n",
++		 processed_count, valid, fifo_count, irq_rt, irq_latched,
++		 ctl2, ctl3, qg->vbat_uv, qg->ibat_ua);
++
++	return 0;
++}
++
+ /**
+  * qg_update_ocv() - Read the latest good OCV if available.
+  * @qg: QGauge instance
+@@ -344,8 +435,28 @@ static int qg_get_capacity(struct qcom_qg *qg, int *capacity)
+ static irqreturn_t qg_fifo_done_irq(int irq, void *data)
+ {
+ 	struct qcom_qg *qg = data;
++	unsigned int fifo_count, irq_rt, irq_latched, ctl2, ctl3;
++	unsigned int processed_count, valid;
++	bool log_first = !qg->fifo_irq_logged;
++	int ret;
+ 
+-	qg_read_fifo_vbat(qg);
++	if (log_first) {
++		ret = qg_read_fifo_state(qg, &fifo_count, &irq_rt,
++					 &irq_latched, &ctl2, &ctl3);
++		if (!ret)
++			dev_info(qg->dev,
++				 "[QG-V3] first FIFO IRQ: fifo=%u rt=0x%02x latched=0x%02x ctl2=0x%02x ctl3=0x%02x\n",
++				 fifo_count, irq_rt, irq_latched, ctl2, ctl3);
++	}
++
++	ret = qg_read_fifo(qg, &processed_count, &valid);
++	if (ret)
++		dev_warn(qg->dev, "Failed to read FIFO: %d\n", ret);
++	else if (log_first)
++		dev_info(qg->dev,
++			 "[QG-V3] FIFO IRQ consumed: reported=%u valid=%u vbat=%u uV ibat=%d uA\n",
++			 processed_count, valid, qg->vbat_uv, qg->ibat_ua);
++	qg->fifo_irq_logged = true;
+ 	power_supply_changed(qg->psy);
+ 
+ 	return IRQ_HANDLED;
+@@ -451,15 +562,22 @@ static int qg_get_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
+-		ret = qg_read_current(qg, QG_LAST_ADC_I, &qg->ibat_ua);
++		if (qg->fifo_data_valid) {
++			val->intval = qg->ibat_ua;
++			return 0;
++		}
++		ret = qg_read_current(qg, QG_LAST_ADC_I, &val->intval);
+ 		if (ret)
+ 			return ret;
+-		val->intval = qg->ibat_ua;
+ 		return 0;
+ 
+ 	case POWER_SUPPLY_PROP_CURRENT_AVG:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
++		if (qg->fifo_data_valid) {
++			val->intval = qg->ibat_ua;
++			return 0;
++		}
+ 		return qg_read_current(qg, QG_S2_NORMAL_AVG_I,
+ 				       &val->intval);
+ 
+@@ -630,6 +748,11 @@ static int qcom_qg_probe(struct platform_device *pdev)
+ 					     "Failed to request batt-missing IRQ\n");
+ 	}
+ 
++	ret = qg_process_pending_fifo(qg);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "Failed to process pending FIFO\n");
++
+ 	platform_set_drvdata(pdev, qg);
+ 
+ 	dev_info(dev, "Qualcomm QG: batt=%s OCV=%u uV VBAT=%u uV\n",

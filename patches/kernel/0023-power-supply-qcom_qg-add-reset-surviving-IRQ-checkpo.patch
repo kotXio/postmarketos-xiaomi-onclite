@@ -1,0 +1,127 @@
+From 10b9375b22feb589c8a6e22ac94213b3c254d22b Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 8 Sep 2026 11:01:41 +0300
+Subject: [PATCH 11/16] power: supply: qcom_qg: add reset-surviving IRQ
+ checkpoints
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/power/supply/qcom_qg.c | 45 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 43 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_qg.c b/drivers/power/supply/qcom_qg.c
+index 4302c0c547b03..0707c14da1e26 100644
+--- a/drivers/power/supply/qcom_qg.c
++++ b/drivers/power/supply/qcom_qg.c
+@@ -257,9 +257,14 @@ static int qg_read_fifo(struct qcom_qg *qg, unsigned int *fifo_count_out,
+ 	*valid_out = 0;
+ 	guard(mutex)(&qg->lock);
+ 
++	dev_alert(qg->dev, "[QG-V5] read-fifo enter\n");
++	dev_alert(qg->dev, "[QG-V5] master-hold assert begin\n");
+ 	ret = qg_master_hold(qg, true);
+-	if (ret)
++	dev_alert(qg->dev, "[QG-V5] master-hold assert end ret=%d\n", ret);
++	if (ret) {
++		dev_alert(qg->dev, "[QG-V5] read-fifo exit ret=%d\n", ret);
+ 		return ret;
++	}
+ 
+ 	ret = regmap_read(qg->regmap, qg->base + QG_STATUS3, &count_reg);
+ 	if (ret)
+@@ -270,6 +275,9 @@ static int qg_read_fifo(struct qcom_qg *qg, unsigned int *fifo_count_out,
+ 		fifo_count = QG_MAX_FIFO_LENGTH;
+ 	*fifo_count_out = fifo_count;
+ 
++	dev_alert(qg->dev, "[QG-V5] FIFO data read begin count=%u\n",
++		  fifo_count);
++
+ 	for (i = 0; i < fifo_count; i++) {
+ 		ret = qg_read16(qg, QG_V_FIFO0 + i * 2, &vraw);
+ 		if (ret)
+@@ -293,12 +301,24 @@ static int qg_read_fifo(struct qcom_qg *qg, unsigned int *fifo_count_out,
+ 		qg->fifo_data_valid = true;
+ 	}
+ 	*valid_out = valid;
++	dev_alert(qg->dev,
++		  "[QG-V5] FIFO data read end count=%u valid=%u\n",
++		  fifo_count, valid);
+ 
+ release:
++	dev_alert(qg->dev,
++		  "[QG-V5] master-hold release begin data-ret=%d\n", ret);
+ 	release_ret = qg_master_hold(qg, false);
++	dev_alert(qg->dev,
++		  "[QG-V5] master-hold release end data-ret=%d release-ret=%d\n",
++		  ret, release_ret);
+ 	if (!ret)
+ 		ret = release_ret;
+ 
++	dev_alert(qg->dev,
++		  "[QG-V5] read-fifo exit ret=%d count=%u valid=%u\n",
++		  ret, *fifo_count_out, *valid_out);
++
+ 	return ret;
+ }
+ 
+@@ -440,16 +460,30 @@ static irqreturn_t qg_fifo_done_irq(int irq, void *data)
+ 	bool log_first = !qg->fifo_irq_logged;
+ 	int ret;
+ 
++	dev_alert(qg->dev, "[QG-V5] FIFO IRQ enter first=%u\n", log_first);
++
+ 	if (log_first) {
++		dev_alert(qg->dev, "[QG-V5] FIFO IRQ state read begin\n");
+ 		ret = qg_read_fifo_state(qg, &fifo_count, &irq_rt,
+ 					 &irq_latched, &ctl2, &ctl3);
+-		if (!ret)
++		if (!ret) {
++			dev_alert(qg->dev,
++				  "[QG-V5] FIFO IRQ state read end ret=0 fifo=%u rt=0x%02x latched=0x%02x ctl2=0x%02x ctl3=0x%02x\n",
++				  fifo_count, irq_rt, irq_latched, ctl2, ctl3);
+ 			dev_info(qg->dev,
+ 				 "[QG-V3] first FIFO IRQ: fifo=%u rt=0x%02x latched=0x%02x ctl2=0x%02x ctl3=0x%02x\n",
+ 				 fifo_count, irq_rt, irq_latched, ctl2, ctl3);
++		} else {
++			dev_alert(qg->dev,
++				  "[QG-V5] FIFO IRQ state read end ret=%d\n", ret);
++		}
+ 	}
+ 
++	dev_alert(qg->dev, "[QG-V5] FIFO IRQ consume begin\n");
+ 	ret = qg_read_fifo(qg, &processed_count, &valid);
++	dev_alert(qg->dev,
++		  "[QG-V5] FIFO IRQ consume end ret=%d count=%u valid=%u\n",
++		  ret, processed_count, valid);
+ 	if (ret)
+ 		dev_warn(qg->dev, "Failed to read FIFO: %d\n", ret);
+ 	else if (log_first)
+@@ -457,7 +491,10 @@ static irqreturn_t qg_fifo_done_irq(int irq, void *data)
+ 			 "[QG-V3] FIFO IRQ consumed: reported=%u valid=%u vbat=%u uV ibat=%d uA\n",
+ 			 processed_count, valid, qg->vbat_uv, qg->ibat_ua);
+ 	qg->fifo_irq_logged = true;
++	dev_alert(qg->dev, "[QG-V5] FIFO IRQ notify begin\n");
+ 	power_supply_changed(qg->psy);
++	dev_alert(qg->dev, "[QG-V5] FIFO IRQ notify end\n");
++	dev_alert(qg->dev, "[QG-V5] FIFO IRQ exit\n");
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -748,13 +785,17 @@ static int qcom_qg_probe(struct platform_device *pdev)
+ 					     "Failed to request batt-missing IRQ\n");
+ 	}
+ 
++	dev_alert(dev, "[QG-V5] probe IRQ setup complete\n");
++	dev_alert(dev, "[QG-V5] probe pending FIFO begin\n");
+ 	ret = qg_process_pending_fifo(qg);
++	dev_alert(dev, "[QG-V5] probe pending FIFO end ret=%d\n", ret);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret,
+ 				     "Failed to process pending FIFO\n");
+ 
+ 	platform_set_drvdata(pdev, qg);
+ 
++	dev_alert(dev, "[QG-V5] probe complete\n");
+ 	dev_info(dev, "Qualcomm QG: batt=%s OCV=%u uV VBAT=%u uV\n",
+ 		 qg->batt_present ? "present" : "absent",
+ 		 qg->ocv_uv, qg->vbat_uv);

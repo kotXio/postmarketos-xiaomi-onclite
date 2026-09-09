@@ -35,7 +35,8 @@ One Redmi 7 Global (`M1810F6LG`) passed:
 - measured VBUS of `5.03 V` unloaded and `4.98 V / 0.11 A` with the hub;
 - return to high-speed NCM and USB SSH in the same boot;
 - one DEVICE-mode `s2idle`/resume cycle followed by working NCM;
-- persistent r16 package installation and a normal DEVICE/NCM boot.
+- persistent r16 installation and regression testing under cumulative r25 with
+  a normal DEVICE/NCM boot.
 
 The fault IRQs registered with zero counts in normal operation. A deliberate
 short circuit or over-current test was not performed.
@@ -47,7 +48,8 @@ short circuit or over-current test was not performed.
 - The `500 mA` limit is intentional. Use a separately powered hub for devices
   that may need more current.
 - Keep a recovery path and verify an empty adapter before a real peripheral.
-- Suspend behavior is a separate unresolved device problem.
+- Manual cable-free `s2idle`/resume works under cumulative r25; automatic idle
+  suspend and actual sleep current remain unverified.
 
 The source order and references are in
 [`../patches/README.md`](../patches/README.md) and

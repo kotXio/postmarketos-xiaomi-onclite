@@ -1,0 +1,51 @@
+From ca273610b9168ce1dd4d43d6598a7cebafc29ca6 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 8 Sep 2026 20:11:41 +0300
+Subject: [PATCH] power: supply: qcom_qg: report live current registers
+
+Once FIFO data became valid, both current properties returnedlk returned the cached FIFO average forever. Read the last and normal-average registers directly so current follows cable and charger transitions while FIFO remains available for its sampling path.
+---
+ drivers/power/supply/qcom_qg.c | 21 ++++++---------------
+ 1 file changed, 6 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_qg.c b/drivers/power/supply/qcom_qg.c
+index 02a95f1fe107e..d460888b9fe61 100644
+--- a/drivers/power/supply/qcom_qg.c
++++ b/drivers/power/supply/qcom_qg.c
+@@ -827,27 +827,18 @@ static int qg_get_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
+-		if (qg->fifo_data_valid) {
+-			val->intval = qg->ibat_ua;
+-		} else {
+-			ret = qg_read_current(qg, QG_LAST_ADC_I, &val->intval);
+-			if (ret)
+-				return ret;
+-		}
++		ret = qg_read_current(qg, QG_LAST_ADC_I, &val->intval);
++		if (ret)
++			return ret;
+ 		val->intval = qg_apply_current_deadband(val->intval);
+ 		return 0;
+ 
+ 	case POWER_SUPPLY_PROP_CURRENT_AVG:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
+-		if (qg->fifo_data_valid) {
+-			val->intval = qg->ibat_ua;
+-		} else {
+-			ret = qg_read_current(qg, QG_S2_NORMAL_AVG_I,
+-					      &val->intval);
+-			if (ret)
+-				return ret;
+-		}
++		ret = qg_read_current(qg, QG_S2_NORMAL_AVG_I, &val->intval);
++		if (ret)
++			return ret;
+ 		val->intval = qg_apply_current_deadband(val->intval);
+ 		return 0;
+ 
+-- 
+2.43.0
+

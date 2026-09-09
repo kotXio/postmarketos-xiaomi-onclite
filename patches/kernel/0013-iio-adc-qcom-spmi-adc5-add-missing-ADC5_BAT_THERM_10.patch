@@ -1,0 +1,36 @@
+From 1ad084b161d129d2edb7cbd5d5d5848b9453fb8a Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Fri, 13 Mar 2026 17:46:37 +0100
+Subject: [PATCH 01/16] iio: adc: qcom-spmi-adc5: add missing
+ ADC5_BAT_THERM_100K_PU channel
+
+The adc5_chans_pmic[] array is missing an entry for ADC5_BAT_THERM_100K_PU
+(channel 0x4a). The zero-initialized entry has info_mask=0 and type=IIO_VOLTAGE,
+which means iio_read_channel_processed() returns -EINVAL for this channel since
+BIT(IIO_CHAN_INFO_PROCESSED) is not set.
+
+This affects PMICs like the PMI632 that use this channel for battery thermistor
+readings via a 100K pull-up. Without this fix, battery temperature cannot be
+read through the IIO subsystem.
+
+Add the missing channel definition with SCALE_HW_CALIB_THERM_100K_PULLUP
+scaling, consistent with the other thermistor channels in the array.
+
+Signed-off-by: Marc Lainez <marc.lainez@gmail.com>
+---
+ drivers/iio/adc/qcom-spmi-adc5.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/iio/adc/qcom-spmi-adc5.c b/drivers/iio/adc/qcom-spmi-adc5.c
+index af3c2f659f5e9..aa785b846bb36 100644
+--- a/drivers/iio/adc/qcom-spmi-adc5.c
++++ b/drivers/iio/adc/qcom-spmi-adc5.c
+@@ -543,6 +543,8 @@ static const struct adc5_channels adc5_chans_pmic[ADC5_MAX_CHANNEL] = {
+ 					SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_XO_THERM_100K_PU]	= ADC5_CHAN_TEMP("xo_therm", 0,
+ 					SCALE_HW_CALIB_XOTHERM)
++	[ADC5_BAT_THERM_100K_PU] = ADC5_CHAN_TEMP("bat_therm", 0,
++					SCALE_HW_CALIB_THERM_100K_PULLUP)
+ 	[ADC5_BAT_ID_100K_PU]	= ADC5_CHAN_TEMP("bat_id", 0,
+ 					SCALE_HW_CALIB_DEFAULT)
+ 	[ADC5_AMUX_THM1_100K_PU] = ADC5_CHAN_TEMP("amux_thm1_100k_pu", 0,

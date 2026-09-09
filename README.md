@@ -20,26 +20,30 @@ owner can reproduce the work safely.
 - [Kernel and pmaports patch series](patches/README.md)
 - [Pinned sources and provenance](SOURCES.md)
 
-## Verified improvement
+## Verified improvements
 
 - Automatic micro-USB DEVICE/HOST switching from the PMI632 RID signal.
 - Phone-supplied VBUS limited to `500 mA`, with readback and fail-closed fault
   handling.
 - Clean removal of an empty adapter and a bus-powered hub with RTL8152.
 - Same-boot return to DEVICE mode with automatic NCM/USB-network restoration.
+- PMI632 QGauge battery telemetry through the standard Linux power-supply
+  interface.
+- Battery voltage, current, temperature, status, health and approximate charge
+  level in UPower and Plasma Mobile.
 
 ## Release
 
-The first binary release is
-[`v2026.09.07-usb-otg`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.07-usb-otg).
-It contains the cumulative kernel and two required userspace packages for
-Xiaomi Redmi 7 (`onclite`), `aarch64`, postmarketOS `v26.06` and Linux
+The latest binary release is
+[`v2026.09.09-battery`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.09-battery).
+It contains cumulative kernel r25 with USB OTG and battery telemetry, plus the
+two USB userspace packages required for complete DEVICE/HOST recovery. It is
+for Xiaomi Redmi 7 (`onclite`), `aarch64`, postmarketOS `v26.06` and Linux
 `7.0.9-msm8953`.
 
-The three packages were tested on a Redmi 7. Kernel r16 is installed on the
-test phone and boots normally. USB networking works, and the PMI632 fault
-counters remain at zero. Read the exact compatibility, installation and
-rollback information in
+Kernel r25 is installed on the test phone and boots normally from microSD.
+Battery reporting, USB networking, OTG and cable-free `s2idle`/resume were
+physically tested. Read the exact compatibility, installation and rollback in
 [`packages/README.md`](packages/README.md) before using it.
 
 ## Known gaps
@@ -48,6 +52,10 @@ rollback information in
   but a real short circuit or over-current fault was deliberately not created.
 - USB VBUS is intentionally limited to `500 mA`; high-current devices need a
   separately powered hub.
+- Battery capacity is estimated from voltage and is not learned or
+  coulomb-counted.
+- Linux reports inherited PMI632 charging state but does not configure charger
+  current, voltage or thermal policy.
 
 ## Licensing
 

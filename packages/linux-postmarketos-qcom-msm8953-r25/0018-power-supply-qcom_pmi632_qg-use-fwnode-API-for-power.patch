@@ -1,0 +1,28 @@
+From 64eb5b28436cce0d035f862e61405276ea8970a2 Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Tue, 17 Mar 2026 10:04:15 +0100
+Subject: [PATCH 08/11] power: supply: qcom_pmi632_qg: use fwnode API for power
+ supply config
+
+The power_supply_config struct replaced the of_node member with fwnode.
+Use dev_fwnode() helper to obtain the firmware node instead.
+---
+ drivers/power/supply/qcom_pmi632_qg.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/qcom_pmi632_qg.c b/drivers/power/supply/qcom_pmi632_qg.c
+index f300380bf..ddbd77481 100644
+--- a/drivers/power/supply/qcom_pmi632_qg.c
++++ b/drivers/power/supply/qcom_pmi632_qg.c
+@@ -568,7 +568,7 @@ static int pmi632_qg_probe(struct platform_device *pdev)
+ 
+ 	/* Register power supply */
+ 	psy_cfg.drv_data = qg;
+-	psy_cfg.of_node = dev->of_node;
++	psy_cfg.fwnode = dev_fwnode(dev);
+ 
+ 	qg->psy = devm_power_supply_register(dev, &qg_psy_desc, &psy_cfg);
+ 	if (IS_ERR(qg->psy))
+-- 
+2.43.0
+

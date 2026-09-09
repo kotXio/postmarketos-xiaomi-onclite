@@ -1,0 +1,554 @@
+From 777c2425bdb77a9cdeb9afde0dd9081edd2c0a85 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 13:55:40 +0300
+Subject: [PATCH 08/16] power: supply: qcom_qg: address initial review
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/power/supply/Kconfig   |  12 +--
+ drivers/power/supply/Makefile  |   2 +-
+ drivers/power/supply/qcom_qg.c | 192 ++++++++++++++++++---------------
+ 3 files changed, 111 insertions(+), 95 deletions(-)
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 94c0ded1525a2..2a0685fc42e21 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -742,18 +742,18 @@ config BATTERY_PM8916_BMS_VM
+ 	  To compile this driver as module, choose M here: the
+ 	  module will be called pm8916_bms_vm.
+ 
+-config BATTERY_PMI632_QG
+-	tristate "Qualcomm PMI632 QGauge fuel gauge support"
++config BATTERY_QCOM_QG
++	tristate "Qualcomm QGauge fuel gauge support"
+ 	depends on MFD_SPMI_PMIC || COMPILE_TEST
+ 	depends on IIO
+ 	help
+ 	  Say Y to add support for the QGauge (QG) fuel gauge block found
+-	  in the Qualcomm PMI632 PMIC. This hardware provides battery
+-	  voltage and current FIFO sampling, open circuit voltage (OCV)
+-	  measurement, and coulomb counting for battery state estimation.
++	  in Qualcomm PMICs such as PMI632 and PM6150. This hardware provides
++	  battery voltage and current FIFO sampling, open circuit voltage
++	  (OCV) measurement, and coulomb counting for battery state estimation.
+ 
+ 	  To compile this driver as module, choose M here: the
+-	  module will be called qcom_pmi632_qg.
++	  module will be called qcom_qg.
+ 
+ config CHARGER_PM8916_LBC
+ 	tristate "Qualcomm PM8916 Linear Battery Charger support"
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index 1415c7723d0f6..d51cbbb5e0b48 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -96,7 +96,7 @@ obj-$(CONFIG_CHARGER_MT6360)	+= mt6360_charger.o
+ obj-$(CONFIG_CHARGER_MT6370)	+= mt6370-charger.o
+ obj-$(CONFIG_CHARGER_QCOM_SMBB)	+= qcom_smbb.o
+ obj-$(CONFIG_BATTERY_PM8916_BMS_VM)	+= pm8916_bms_vm.o
+-obj-$(CONFIG_BATTERY_PMI632_QG)		+= qcom_pmi632_qg.o
++obj-$(CONFIG_BATTERY_QCOM_QG)		+= qcom_qg.o
+ obj-$(CONFIG_CHARGER_PM8916_LBC)	+= pm8916_lbc.o
+ obj-$(CONFIG_BATTERY_PMI8994_FG)	+= pmi8994_fg.o
+ obj-$(CONFIG_CHARGER_QCOM_SMBCHG)	+= qcom-smbchg.o
+diff --git a/drivers/power/supply/qcom_qg.c b/drivers/power/supply/qcom_qg.c
+index ddbd77481a0dc..955bd378f8ac5 100644
+--- a/drivers/power/supply/qcom_qg.c
++++ b/drivers/power/supply/qcom_qg.c
+@@ -2,7 +2,7 @@
+ /*
+  * Copyright (c) 2025, Marc Lainez <marc.lainez@gmail.com>
+  *
+- * Qualcomm PMI632 QGauge (QG) fuel gauge driver.
++ * Qualcomm QGauge (QG) fuel gauge driver.
+  *
+  * The QG hardware block provides battery voltage and current measurement
+  * via FIFO-based sampling, open circuit voltage (OCV) measurement during
+@@ -44,17 +44,18 @@
+ #define QG_DATA_CTL1			0x41
+ #define  QG_DATA_CTL1_MASTER_HOLD	BIT(0)
+ 
+-#define QG_DATA_CTL2			0x42
+-#define  QG_DATA_CTL2_BURST_AVG_HOLD	BIT(0)
+-
+ /* FIFO / measurement control */
+ #define QG_S2_NORMAL_MEAS_CTL2		0x51
+ #define  QG_S2_FIFO_LENGTH_MASK		GENMASK(5, 3)
+ #define  QG_S2_FIFO_LENGTH_SHIFT	3
+ #define  QG_S2_NUM_ACCUM_MASK		GENMASK(2, 0)
+ 
++/* Normal average data registers (16-bit little-endian) */
++#define QG_S2_NORMAL_AVG_V		0x80
++#define QG_S2_NORMAL_AVG_I		0x82
++
+ /* OCV data registers (16-bit little-endian) */
+-#define QG_S7_PON_OCV_V		0x70
++#define QG_S7_PON_OCV_V			0x70
+ #define QG_S3_GOOD_OCV_V		0x74
+ 
+ /* FIFO data registers */
+@@ -64,12 +65,10 @@
+ /* Last ADC data registers */
+ #define QG_LAST_ADC_V			0xC0
+ #define QG_LAST_ADC_I			0xC2
+-#define QG_LAST_BURST_AVG_I		0xC6
+ 
+ /* Sentinel value indicating FIFO entry is not yet written */
+ #define QG_FIFO_RESET_VAL		0x8000
+ 
+-/* Maximum hardware FIFO depth */
+ #define QG_MAX_FIFO_LENGTH		8
+ 
+ /*
+@@ -86,7 +85,7 @@
+  */
+ #define QG_OCV_STALE_SECS		180
+ 
+-struct pmi632_qg {
++struct qcom_qg {
+ 	struct device *dev;
+ 	struct regmap *regmap;
+ 	unsigned int base;
+@@ -108,7 +107,7 @@ struct pmi632_qg {
+ 
+ /* --- Low-level register helpers --- */
+ 
+-static int qg_read16(struct pmi632_qg *qg, unsigned int reg, u16 *val)
++static int qg_read16(struct qcom_qg *qg, unsigned int reg, u16 *val)
+ {
+ 	int ret;
+ 	__le16 raw;
+@@ -123,12 +122,14 @@ static int qg_read16(struct pmi632_qg *qg, unsigned int reg, u16 *val)
+ 
+ /**
+  * qg_master_hold() - Assert/release the FIFO master hold.
++ * @qg: QGauge instance
++ * @hold: true to assert the hold, false to release it
+  *
+  * The master hold freezes the FIFO data registers so they can be read
+  * coherently. The hardware requires a 0->1 transition to assert, and
+  * writing 0 to release.
+  */
+-static int qg_master_hold(struct pmi632_qg *qg, bool hold)
++static int qg_master_hold(struct qcom_qg *qg, bool hold)
+ {
+ 	int ret;
+ 
+@@ -148,7 +149,7 @@ static int qg_master_hold(struct pmi632_qg *qg, bool hold)
+ 
+ /* --- Measurement reading functions --- */
+ 
+-static int qg_read_battery_present(struct pmi632_qg *qg, bool *present)
++static int qg_read_battery_present(struct qcom_qg *qg, bool *present)
+ {
+ 	unsigned int val;
+ 	int ret;
+@@ -161,40 +162,27 @@ static int qg_read_battery_present(struct pmi632_qg *qg, bool *present)
+ 	return 0;
+ }
+ 
+-static int qg_read_vbat(struct pmi632_qg *qg, unsigned int *vbat_uv)
++static int qg_read_voltage(struct qcom_qg *qg, unsigned int reg,
++			   unsigned int *voltage_uv)
+ {
+ 	u16 raw;
+ 	int ret;
+ 
+-	ret = qg_read16(qg, QG_LAST_ADC_V, &raw);
++	ret = qg_read16(qg, reg, &raw);
+ 	if (ret)
+ 		return ret;
+ 
+-	*vbat_uv = QG_V_RAW_TO_UV(raw);
++	*voltage_uv = QG_V_RAW_TO_UV(raw);
+ 	return 0;
+ }
+ 
+-static int qg_read_ibat(struct pmi632_qg *qg, int *ibat_ua)
++static int qg_read_current(struct qcom_qg *qg, unsigned int reg,
++			   int *current_ua)
+ {
+ 	u16 raw;
+ 	int ret;
+ 
+-	/*
+-	 * Hold the burst average register to get a coherent reading,
+-	 * then release after reading.
+-	 */
+-	ret = regmap_update_bits(qg->regmap, qg->base + QG_DATA_CTL2,
+-				 QG_DATA_CTL2_BURST_AVG_HOLD,
+-				 QG_DATA_CTL2_BURST_AVG_HOLD);
+-	if (ret)
+-		return ret;
+-
+-	ret = qg_read16(qg, QG_LAST_BURST_AVG_I, &raw);
+-
+-	/* Always release the hold, even if the read failed */
+-	regmap_update_bits(qg->regmap, qg->base + QG_DATA_CTL2,
+-			   QG_DATA_CTL2_BURST_AVG_HOLD, 0);
+-
++	ret = qg_read16(qg, reg, &raw);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -203,12 +191,12 @@ static int qg_read_ibat(struct pmi632_qg *qg, int *ibat_ua)
+ 	 * Power supply class convention (ABI): positive = charge, negative = discharge.
+ 	 * Negate to match the ABI.
+ 	 */
+-	*ibat_ua = -QG_I_RAW_TO_UA(sign_extend32(raw, 15));
++	*current_ua = -QG_I_RAW_TO_UA(sign_extend32(raw, 15));
+ 	return 0;
+ }
+ 
+-static int qg_read_ocv(struct pmi632_qg *qg, unsigned int reg,
+-			unsigned int *ocv_uv)
++static int qg_read_ocv(struct qcom_qg *qg, unsigned int reg,
++		       unsigned int *ocv_uv)
+ {
+ 	u16 raw;
+ 	int ret;
+@@ -221,7 +209,7 @@ static int qg_read_ocv(struct pmi632_qg *qg, unsigned int reg,
+ 	return 0;
+ }
+ 
+-static int qg_read_temperature(struct pmi632_qg *qg, int *temp_decidegc)
++static int qg_read_temperature(struct qcom_qg *qg, int *temp_decidegc)
+ {
+ 	int ret, val;
+ 
+@@ -240,25 +228,27 @@ static int qg_read_temperature(struct pmi632_qg *qg, int *temp_decidegc)
+ 
+ /**
+  * qg_read_fifo_vbat() - Read voltage samples from the hardware FIFO.
++ * @qg: QGauge instance
+  *
+  * Asserts master hold, reads available FIFO entries, averages them,
+  * and stores the result. This gives a better voltage estimate than
+  * the single last-ADC register.
+  */
+-static int qg_read_fifo_vbat(struct pmi632_qg *qg)
++static int qg_read_fifo_vbat(struct qcom_qg *qg)
+ {
+ 	unsigned int count_reg;
+ 	unsigned int fifo_count;
+ 	u64 vbat_sum = 0;
+ 	unsigned int valid = 0;
+ 	u16 raw;
++	int release_ret;
+ 	int ret, i;
+ 
+-	mutex_lock(&qg->lock);
++	guard(mutex)(&qg->lock);
+ 
+ 	ret = qg_master_hold(qg, true);
+ 	if (ret)
+-		goto unlock;
++		return ret;
+ 
+ 	ret = regmap_read(qg->regmap, qg->base + QG_STATUS3, &count_reg);
+ 	if (ret)
+@@ -284,21 +274,23 @@ static int qg_read_fifo_vbat(struct pmi632_qg *qg)
+ 		qg->vbat_uv = div_u64(vbat_sum, valid);
+ 
+ release:
+-	qg_master_hold(qg, false);
+-unlock:
+-	mutex_unlock(&qg->lock);
++	release_ret = qg_master_hold(qg, false);
++	if (!ret)
++		ret = release_ret;
++
+ 	return ret;
+ }
+ 
+ /**
+  * qg_update_ocv() - Read the latest good OCV if available.
++ * @qg: QGauge instance
+  *
+  * Checks STATUS2 for the GOOD_OCV bit; if set, reads the S3 good OCV
+  * register and updates the cached OCV with a timestamp.
+  *
+  * The STATUS2 register is "sticky" - reading it clears the GOOD_OCV bit.
+  */
+-static int qg_update_ocv(struct pmi632_qg *qg)
++static int qg_update_ocv(struct qcom_qg *qg)
+ {
+ 	unsigned int status2;
+ 	unsigned int ocv_uv;
+@@ -324,7 +316,7 @@ static int qg_update_ocv(struct pmi632_qg *qg)
+ 	return 0;
+ }
+ 
+-static int qg_get_capacity(struct pmi632_qg *qg, int *capacity)
++static int qg_get_capacity(struct qcom_qg *qg, int *capacity)
+ {
+ 	int temp_decidegc;
+ 	int ret;
+@@ -332,11 +324,6 @@ static int qg_get_capacity(struct pmi632_qg *qg, int *capacity)
+ 	if (!qg->batt_info)
+ 		return -ENODATA;
+ 
+-	/*
+-	 * If OCV is stale, fall back to using current voltage as a
+-	 * rough approximation. This is less accurate under load but
+-	 * better than reporting nothing.
+-	 */
+ 	if (!qg->ocv_uv)
+ 		return -ENODATA;
+ 
+@@ -356,7 +343,7 @@ static int qg_get_capacity(struct pmi632_qg *qg, int *capacity)
+ 
+ static irqreturn_t qg_fifo_done_irq(int irq, void *data)
+ {
+-	struct pmi632_qg *qg = data;
++	struct qcom_qg *qg = data;
+ 
+ 	qg_read_fifo_vbat(qg);
+ 	power_supply_changed(qg->psy);
+@@ -366,7 +353,7 @@ static irqreturn_t qg_fifo_done_irq(int irq, void *data)
+ 
+ static irqreturn_t qg_good_ocv_irq(int irq, void *data)
+ {
+-	struct pmi632_qg *qg = data;
++	struct qcom_qg *qg = data;
+ 
+ 	mutex_lock(&qg->lock);
+ 	qg_update_ocv(qg);
+@@ -379,7 +366,7 @@ static irqreturn_t qg_good_ocv_irq(int irq, void *data)
+ 
+ static irqreturn_t qg_batt_missing_irq(int irq, void *data)
+ {
+-	struct pmi632_qg *qg = data;
++	struct qcom_qg *qg = data;
+ 	bool present;
+ 
+ 	if (!qg_read_battery_present(qg, &present))
+@@ -396,7 +383,8 @@ static int qg_get_property(struct power_supply *psy,
+ 			   enum power_supply_property psp,
+ 			   union power_supply_propval *val)
+ {
+-	struct pmi632_qg *qg = power_supply_get_drvdata(psy);
++	struct qcom_qg *qg = power_supply_get_drvdata(psy);
++	unsigned int voltage_uv;
+ 	int ret;
+ 
+ 	switch (psp) {
+@@ -419,27 +407,42 @@ static int qg_get_property(struct power_supply *psy,
+ 		return 0;
+ 
+ 	case POWER_SUPPLY_PROP_HEALTH:
+-		if (!qg->batt_present) {
++		if (!qg->batt_present ||
++		    !power_supply_battery_info_has_prop(qg->batt_info,
++							POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN) ||
++		    !power_supply_battery_info_has_prop(qg->batt_info,
++							POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN)) {
+ 			val->intval = POWER_SUPPLY_HEALTH_UNKNOWN;
+ 			return 0;
+ 		}
+-		if (qg->batt_info) {
+-			if (qg->vbat_uv < qg->batt_info->voltage_min_design_uv)
+-				val->intval = POWER_SUPPLY_HEALTH_DEAD;
+-			else if (qg->vbat_uv > qg->batt_info->voltage_max_design_uv)
+-				val->intval = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+-			else
+-				val->intval = POWER_SUPPLY_HEALTH_GOOD;
+-		} else {
+-			val->intval = POWER_SUPPLY_HEALTH_UNKNOWN;
+-		}
++		if (qg->vbat_uv < qg->batt_info->voltage_min_design_uv)
++			val->intval = POWER_SUPPLY_HEALTH_DEAD;
++		else if (qg->vbat_uv > qg->batt_info->voltage_max_design_uv)
++			val->intval = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
++		else
++			val->intval = POWER_SUPPLY_HEALTH_GOOD;
++		return 0;
++
++	case POWER_SUPPLY_PROP_TECHNOLOGY:
++	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
++	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
++	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
++		return power_supply_battery_info_get_prop(qg->batt_info, psp, val);
++
++	case POWER_SUPPLY_PROP_VOLTAGE_AVG:
++		if (!qg->batt_present)
++			return -ENODATA;
++		ret = qg_read_voltage(qg, QG_S2_NORMAL_AVG_V, &voltage_uv);
++		if (ret)
++			return ret;
++		val->intval = voltage_uv;
+ 		return 0;
+ 
+ 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
+ 		/* Refresh from last ADC register */
+-		ret = qg_read_vbat(qg, &qg->vbat_uv);
++		ret = qg_read_voltage(qg, QG_LAST_ADC_V, &qg->vbat_uv);
+ 		if (ret)
+ 			return ret;
+ 		val->intval = qg->vbat_uv;
+@@ -448,12 +451,18 @@ static int qg_get_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
+-		ret = qg_read_ibat(qg, &qg->ibat_ua);
++		ret = qg_read_current(qg, QG_LAST_ADC_I, &qg->ibat_ua);
+ 		if (ret)
+ 			return ret;
+ 		val->intval = qg->ibat_ua;
+ 		return 0;
+ 
++	case POWER_SUPPLY_PROP_CURRENT_AVG:
++		if (!qg->batt_present)
++			return -ENODATA;
++		return qg_read_current(qg, QG_S2_NORMAL_AVG_I,
++				       &val->intval);
++
+ 	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
+ 		if (!qg->batt_present)
+ 			return -ENODATA;
+@@ -483,8 +492,14 @@ static enum power_supply_property qg_properties[] = {
+ 	POWER_SUPPLY_PROP_PRESENT,
+ 	POWER_SUPPLY_PROP_STATUS,
+ 	POWER_SUPPLY_PROP_HEALTH,
++	POWER_SUPPLY_PROP_TECHNOLOGY,
++	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
++	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
++	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+ 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_VOLTAGE_AVG,
+ 	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CURRENT_AVG,
+ 	POWER_SUPPLY_PROP_VOLTAGE_OCV,
+ 	POWER_SUPPLY_PROP_CAPACITY,
+ 	POWER_SUPPLY_PROP_TEMP,
+@@ -500,10 +515,10 @@ static const struct power_supply_desc qg_psy_desc = {
+ 
+ /* --- Probe and driver registration --- */
+ 
+-static int pmi632_qg_probe(struct platform_device *pdev)
++static int qcom_qg_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+-	struct pmi632_qg *qg;
++	struct qcom_qg *qg;
+ 	struct power_supply_config psy_cfg = {};
+ 	unsigned int perph_type;
+ 	int ret, irq;
+@@ -551,7 +566,7 @@ static int pmi632_qg_probe(struct platform_device *pdev)
+ 	qg->ocv_time = ktime_get_seconds();
+ 
+ 	/* Also read initial voltage */
+-	ret = qg_read_vbat(qg, &qg->vbat_uv);
++	ret = qg_read_voltage(qg, QG_LAST_ADC_V, &qg->vbat_uv);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret,
+ 				     "Failed to read battery voltage\n");
+@@ -587,7 +602,7 @@ static int pmi632_qg_probe(struct platform_device *pdev)
+ 		ret = devm_request_threaded_irq(dev, irq, NULL,
+ 						qg_fifo_done_irq,
+ 						IRQF_ONESHOT,
+-						"pmi632-qg-fifo", qg);
++						"qcom-qg-fifo", qg);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret,
+ 					     "Failed to request fifo-done IRQ\n");
+@@ -598,7 +613,7 @@ static int pmi632_qg_probe(struct platform_device *pdev)
+ 		ret = devm_request_threaded_irq(dev, irq, NULL,
+ 						qg_good_ocv_irq,
+ 						IRQF_ONESHOT,
+-						"pmi632-qg-ocv", qg);
++						"qcom-qg-ocv", qg);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret,
+ 					     "Failed to request good-ocv IRQ\n");
+@@ -609,7 +624,7 @@ static int pmi632_qg_probe(struct platform_device *pdev)
+ 		ret = devm_request_threaded_irq(dev, irq, NULL,
+ 						qg_batt_missing_irq,
+ 						IRQF_ONESHOT,
+-						"pmi632-qg-batt", qg);
++						"qcom-qg-batt", qg);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret,
+ 					     "Failed to request batt-missing IRQ\n");
+@@ -617,16 +632,16 @@ static int pmi632_qg_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, qg);
+ 
+-	dev_info(dev, "PMI632 QG: batt=%s OCV=%u uV VBAT=%u uV\n",
++	dev_info(dev, "Qualcomm QG: batt=%s OCV=%u uV VBAT=%u uV\n",
+ 		 qg->batt_present ? "present" : "absent",
+ 		 qg->ocv_uv, qg->vbat_uv);
+ 
+ 	return 0;
+ }
+ 
+-static int pmi632_qg_suspend(struct device *dev)
++static int qcom_qg_suspend(struct device *dev)
+ {
+-	struct pmi632_qg *qg = dev_get_drvdata(dev);
++	struct qcom_qg *qg = dev_get_drvdata(dev);
+ 
+ 	/*
+ 	 * The QG hardware FSM will automatically transition to sleep
+@@ -638,9 +653,9 @@ static int pmi632_qg_suspend(struct device *dev)
+ 	return 0;
+ }
+ 
+-static int pmi632_qg_resume(struct device *dev)
++static int qcom_qg_resume(struct device *dev)
+ {
+-	struct pmi632_qg *qg = dev_get_drvdata(dev);
++	struct qcom_qg *qg = dev_get_drvdata(dev);
+ 
+ 	/*
+ 	 * After resume, the hardware may have measured a good OCV during
+@@ -651,7 +666,7 @@ static int pmi632_qg_resume(struct device *dev)
+ 	qg_update_ocv(qg);
+ 	mutex_unlock(&qg->lock);
+ 
+-	qg_read_vbat(qg, &qg->vbat_uv);
++	qg_read_voltage(qg, QG_LAST_ADC_V, &qg->vbat_uv);
+ 
+ 	dev_dbg(qg->dev, "Resumed, OCV=%u uV VBAT=%u uV\n",
+ 		qg->ocv_uv, qg->vbat_uv);
+@@ -659,25 +674,26 @@ static int pmi632_qg_resume(struct device *dev)
+ 	return 0;
+ }
+ 
+-static DEFINE_SIMPLE_DEV_PM_OPS(pmi632_qg_pm_ops,
+-				pmi632_qg_suspend, pmi632_qg_resume);
++static DEFINE_SIMPLE_DEV_PM_OPS(qcom_qg_pm_ops,
++				qcom_qg_suspend, qcom_qg_resume);
+ 
+-static const struct of_device_id pmi632_qg_of_match[] = {
++static const struct of_device_id qcom_qg_of_match[] = {
++	{ .compatible = "qcom,pm6150-qg" },
+ 	{ .compatible = "qcom,pmi632-qg" },
+ 	{}
+ };
+-MODULE_DEVICE_TABLE(of, pmi632_qg_of_match);
++MODULE_DEVICE_TABLE(of, qcom_qg_of_match);
+ 
+-static struct platform_driver pmi632_qg_driver = {
++static struct platform_driver qcom_qg_driver = {
+ 	.driver = {
+-		.name = "pmi632-qg",
+-		.of_match_table = pmi632_qg_of_match,
+-		.pm = pm_sleep_ptr(&pmi632_qg_pm_ops),
++		.name = "qcom-qg",
++		.of_match_table = qcom_qg_of_match,
++		.pm = pm_sleep_ptr(&qcom_qg_pm_ops),
+ 	},
+-	.probe = pmi632_qg_probe,
++	.probe = qcom_qg_probe,
+ };
+-module_platform_driver(pmi632_qg_driver);
++module_platform_driver(qcom_qg_driver);
+ 
+-MODULE_DESCRIPTION("Qualcomm PMI632 QGauge fuel gauge driver");
++MODULE_DESCRIPTION("Qualcomm QGauge fuel gauge driver");
+ MODULE_AUTHOR("Marc Lainez <marc.lainez@gmail.com>");
+ MODULE_LICENSE("GPL");

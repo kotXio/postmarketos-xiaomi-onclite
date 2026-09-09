@@ -1,0 +1,27 @@
+From f6a89d8ccbeaf9b14b49d5346ff625958e862db3 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 8 Sep 2026 17:59:20 +0300
+Subject: [PATCH 15/16] arm64: dts: qcom: onclite: enable PMI632 status
+ observer
+
+Let QGauge expose the inherited PMI632 charger state on onclite while the
+full SMB5 charger driver remains deferred. This changes no charger register
+or charging limit.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+index 6e197e3139d8d..c00b5f2468c95 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+@@ -235,6 +235,7 @@ &pmi632_qg {
+ 	monitored-battery = <&battery>;
+ 	io-channels = <&pmi632_adc ADC5_BAT_THERM_100K_PU>;
+ 	io-channel-names = "batt-therm";
++	qcom,read-pmi632-smb5-status;
+ 	status = "okay";
+ };
+ 

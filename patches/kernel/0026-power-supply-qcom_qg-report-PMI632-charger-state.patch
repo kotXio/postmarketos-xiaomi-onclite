@@ -1,0 +1,342 @@
+From 90be535411244cf8c73a073dca892847c80a209b Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 8 Sep 2026 17:59:20 +0300
+Subject: [PATCH 14/16] power: supply: qcom_qg: report PMI632 charger state
+
+Read the validated PMI632 charge-state, USB power-path, health and
+effective float-voltage registers only when opted in. Report standard
+power-supply status, charge type and stock-style health, and clamp the
+measured +/-30 mA ambiguity band to zero without changing charger policy.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/power/supply/qcom_qg.c | 244 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 237 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_qg.c b/drivers/power/supply/qcom_qg.c
+index 1e45a12508249..02a95f1fe107e 100644
+--- a/drivers/power/supply/qcom_qg.c
++++ b/drivers/power/supply/qcom_qg.c
+@@ -75,6 +75,44 @@
+ 
+ #define QG_MAX_FIFO_LENGTH		8
+ 
++/* PMI632 SMB5 registers used only by the opt-in read-only observer. */
++#define PMI632_CHGR_STATUS1		0x1006
++#define  PMI632_CHGR_STATE_MASK		GENMASK(2, 0)
++#define PMI632_CHGR_STATUS2		0x1007
++#define  PMI632_CHGR_BAT_OV		BIT(1)
++#define PMI632_CHGR_STATUS7		0x100d
++#define  PMI632_BAT_TEMP_HOT_SOFT	BIT(5)
++#define  PMI632_BAT_TEMP_COLD_SOFT	BIT(4)
++#define  PMI632_BAT_TEMP_TOO_HOT	BIT(3)
++#define  PMI632_BAT_TEMP_TOO_COLD	BIT(2)
++#define PMI632_CHGR_FLOAT_VOLTAGE	0x1070
++#define PMI632_POWER_PATH_STATUS	0x110b
++#define  PMI632_USE_USBIN		BIT(4)
++#define  PMI632_VALID_INPUT		BIT(0)
++#define PMI632_USBIN_RT_STATUS		0x1310
++#define  PMI632_USBIN_PLUGIN		BIT(4)
++
++enum pmi632_charge_state {
++	PMI632_INHIBIT_CHARGE,
++	PMI632_TRICKLE_CHARGE,
++	PMI632_PRE_CHARGE,
++	PMI632_FULLON_CHARGE,
++	PMI632_TAPER_CHARGE,
++	PMI632_TERMINATE_CHARGE,
++	PMI632_PAUSE_CHARGE,
++	PMI632_DISABLE_CHARGE,
++};
++
++/* PMI632 encodes float voltage from 3.6 V in 10 mV steps. */
++#define PMI632_FLOAT_VOLTAGE_MIN_UV	3600000
++#define PMI632_FLOAT_VOLTAGE_STEP_UV	10000
++
++/* Match the downstream BAT_OV software guard band above effective FV. */
++#define PMI632_BAT_OV_MARGIN_UV		40000
++
++/* Direction is not considered reliable inside the measured idle offset. */
++#define QG_CURRENT_DEADBAND_UA		30000
++
+ /*
+  * Raw ADC to physical unit conversion.
+  *   Voltage: raw * 194637 / 1000 = microvolts
+@@ -109,6 +147,7 @@ struct qcom_qg {
+ 	bool batt_present;
+ 	bool fifo_data_valid;
+ 	bool fifo_irq_logged;
++	bool read_pmi632_smb5_status;
+ };
+ 
+ /* --- Low-level register helpers --- */
+@@ -232,6 +271,172 @@ static int qg_read_temperature(struct qcom_qg *qg, int *temp_decidegc)
+ 	return 0;
+ }
+ 
++static int qg_read_pmi632_charge_state(struct qcom_qg *qg,
++				       unsigned int *state)
++{
++	unsigned int val;
++	int ret;
++
++	ret = regmap_read(qg->regmap, PMI632_CHGR_STATUS1, &val);
++	if (ret)
++		return ret;
++
++	*state = val & PMI632_CHGR_STATE_MASK;
++	return 0;
++}
++
++static int qg_read_pmi632_usb_online(struct qcom_qg *qg, bool *online)
++{
++	unsigned int path_status;
++	unsigned int usb_status;
++	int ret;
++
++	ret = regmap_read(qg->regmap, PMI632_POWER_PATH_STATUS, &path_status);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, PMI632_USBIN_RT_STATUS, &usb_status);
++	if (ret)
++		return ret;
++
++	*online = (path_status & PMI632_USE_USBIN) &&
++		  (path_status & PMI632_VALID_INPUT) &&
++		  (usb_status & PMI632_USBIN_PLUGIN);
++
++	return 0;
++}
++
++static int qg_get_pmi632_status(struct qcom_qg *qg, int *status)
++{
++	unsigned int state;
++	bool online;
++	int ret;
++
++	ret = qg_read_pmi632_usb_online(qg, &online);
++	if (ret)
++		return ret;
++
++	ret = qg_read_pmi632_charge_state(qg, &state);
++	if (ret)
++		return ret;
++
++	if (!online) {
++		*status = POWER_SUPPLY_STATUS_DISCHARGING;
++		return 0;
++	}
++
++	switch (state) {
++	case PMI632_TRICKLE_CHARGE:
++	case PMI632_PRE_CHARGE:
++	case PMI632_FULLON_CHARGE:
++	case PMI632_TAPER_CHARGE:
++		*status = POWER_SUPPLY_STATUS_CHARGING;
++		break;
++	case PMI632_INHIBIT_CHARGE:
++	case PMI632_TERMINATE_CHARGE:
++		*status = POWER_SUPPLY_STATUS_FULL;
++		break;
++	case PMI632_PAUSE_CHARGE:
++	case PMI632_DISABLE_CHARGE:
++		*status = POWER_SUPPLY_STATUS_NOT_CHARGING;
++		break;
++	default:
++		*status = POWER_SUPPLY_STATUS_UNKNOWN;
++		break;
++	}
++
++	return 0;
++}
++
++static int qg_get_pmi632_charge_type(struct qcom_qg *qg, int *charge_type)
++{
++	unsigned int state;
++	bool online;
++	int ret;
++
++	ret = qg_read_pmi632_usb_online(qg, &online);
++	if (ret)
++		return ret;
++
++	ret = qg_read_pmi632_charge_state(qg, &state);
++	if (ret)
++		return ret;
++
++	if (!online) {
++		*charge_type = POWER_SUPPLY_CHARGE_TYPE_NONE;
++		return 0;
++	}
++
++	switch (state) {
++	case PMI632_TRICKLE_CHARGE:
++	case PMI632_PRE_CHARGE:
++		*charge_type = POWER_SUPPLY_CHARGE_TYPE_TRICKLE;
++		break;
++	case PMI632_FULLON_CHARGE:
++	case PMI632_TAPER_CHARGE:
++		/* Mainline power_supply ABI has no separate taper value. */
++		*charge_type = POWER_SUPPLY_CHARGE_TYPE_FAST;
++		break;
++	default:
++		*charge_type = POWER_SUPPLY_CHARGE_TYPE_NONE;
++		break;
++	}
++
++	return 0;
++}
++
++static int qg_get_pmi632_health(struct qcom_qg *qg, int *health)
++{
++	unsigned int status2, status7, fv_raw;
++	unsigned int float_voltage_uv;
++	unsigned int voltage_uv;
++	int ret;
++
++	ret = regmap_read(qg->regmap, PMI632_CHGR_STATUS2, &status2);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, PMI632_CHGR_STATUS7, &status7);
++	if (ret)
++		return ret;
++
++	ret = regmap_read(qg->regmap, PMI632_CHGR_FLOAT_VOLTAGE, &fv_raw);
++	if (ret)
++		return ret;
++
++	ret = qg_read_voltage(qg, QG_LAST_ADC_V, &voltage_uv);
++	if (ret)
++		return ret;
++
++	float_voltage_uv = PMI632_FLOAT_VOLTAGE_MIN_UV +
++			   fv_raw * PMI632_FLOAT_VOLTAGE_STEP_UV;
++
++	if ((status2 & PMI632_CHGR_BAT_OV) &&
++	    voltage_uv >= float_voltage_uv + PMI632_BAT_OV_MARGIN_UV)
++		*health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
++	else if (status7 & PMI632_BAT_TEMP_TOO_COLD)
++		*health = POWER_SUPPLY_HEALTH_COLD;
++	else if (status7 & PMI632_BAT_TEMP_TOO_HOT)
++		*health = POWER_SUPPLY_HEALTH_OVERHEAT;
++	else if (status7 & PMI632_BAT_TEMP_COLD_SOFT)
++		*health = POWER_SUPPLY_HEALTH_COOL;
++	else if (status7 & PMI632_BAT_TEMP_HOT_SOFT)
++		*health = POWER_SUPPLY_HEALTH_WARM;
++	else
++		*health = POWER_SUPPLY_HEALTH_GOOD;
++
++	return 0;
++}
++
++static int qg_apply_current_deadband(int current_ua)
++{
++	if (current_ua >= -QG_CURRENT_DEADBAND_UA &&
++	    current_ua <= QG_CURRENT_DEADBAND_UA)
++		return 0;
++
++	return current_ua;
++}
++
+ /**
+  * qg_read_fifo() - Read voltage and current samples from the hardware FIFO.
+  * @qg: QGauge instance
+@@ -555,6 +760,9 @@ static int qg_get_property(struct power_supply *psy,
+ 			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+ 			return 0;
+ 		}
++		if (qg->read_pmi632_smb5_status)
++			return qg_get_pmi632_status(qg, &val->intval);
++
+ 		ret = power_supply_am_i_supplied(psy);
+ 		if (ret < 0 && ret != -ENODEV)
+ 			return ret;
+@@ -564,6 +772,13 @@ static int qg_get_property(struct power_supply *psy,
+ 			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+ 		return 0;
+ 
++	case POWER_SUPPLY_PROP_CHARGE_TYPE:
++		if (!qg->batt_present)
++			return -ENODATA;
++		if (!qg->read_pmi632_smb5_status)
++			return -ENODATA;
++		return qg_get_pmi632_charge_type(qg, &val->intval);
++
+ 	case POWER_SUPPLY_PROP_HEALTH:
+ 		if (!qg->batt_present ||
+ 		    !power_supply_battery_info_has_prop(qg->batt_info,
+@@ -573,6 +788,9 @@ static int qg_get_property(struct power_supply *psy,
+ 			val->intval = POWER_SUPPLY_HEALTH_UNKNOWN;
+ 			return 0;
+ 		}
++		if (qg->read_pmi632_smb5_status)
++			return qg_get_pmi632_health(qg, &val->intval);
++
+ 		if (qg->vbat_uv < qg->batt_info->voltage_min_design_uv)
+ 			val->intval = POWER_SUPPLY_HEALTH_DEAD;
+ 		else if (qg->vbat_uv > qg->batt_info->voltage_max_design_uv)
+@@ -611,11 +829,12 @@ static int qg_get_property(struct power_supply *psy,
+ 			return -ENODATA;
+ 		if (qg->fifo_data_valid) {
+ 			val->intval = qg->ibat_ua;
+-			return 0;
++		} else {
++			ret = qg_read_current(qg, QG_LAST_ADC_I, &val->intval);
++			if (ret)
++				return ret;
+ 		}
+-		ret = qg_read_current(qg, QG_LAST_ADC_I, &val->intval);
+-		if (ret)
+-			return ret;
++		val->intval = qg_apply_current_deadband(val->intval);
+ 		return 0;
+ 
+ 	case POWER_SUPPLY_PROP_CURRENT_AVG:
+@@ -623,10 +842,14 @@ static int qg_get_property(struct power_supply *psy,
+ 			return -ENODATA;
+ 		if (qg->fifo_data_valid) {
+ 			val->intval = qg->ibat_ua;
+-			return 0;
++		} else {
++			ret = qg_read_current(qg, QG_S2_NORMAL_AVG_I,
++					      &val->intval);
++			if (ret)
++				return ret;
+ 		}
+-		return qg_read_current(qg, QG_S2_NORMAL_AVG_I,
+-				       &val->intval);
++		val->intval = qg_apply_current_deadband(val->intval);
++		return 0;
+ 
+ 	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
+ 		if (!qg->batt_present)
+@@ -656,6 +879,7 @@ static int qg_get_property(struct power_supply *psy,
+ static enum power_supply_property qg_properties[] = {
+ 	POWER_SUPPLY_PROP_PRESENT,
+ 	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CHARGE_TYPE,
+ 	POWER_SUPPLY_PROP_HEALTH,
+ 	POWER_SUPPLY_PROP_TECHNOLOGY,
+ 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
+@@ -705,6 +929,9 @@ static int qcom_qg_probe(struct platform_device *pdev)
+ 		return dev_err_probe(dev, ret,
+ 				     "Failed to read reg property\n");
+ 
++	qg->read_pmi632_smb5_status =
++		device_property_read_bool(dev, "qcom,read-pmi632-smb5-status");
++
+ 	/* Verify peripheral type */
+ 	ret = regmap_read(qg->regmap, qg->base + QG_PERPH_TYPE, &perph_type);
+ 	if (ret)
+@@ -809,6 +1036,9 @@ static int qcom_qg_probe(struct platform_device *pdev)
+ 	dev_info(dev, "Qualcomm QG: batt=%s OCV=%u uV VBAT=%u uV\n",
+ 		 qg->batt_present ? "present" : "absent",
+ 		 qg->ocv_uv, qg->vbat_uv);
++	if (qg->read_pmi632_smb5_status)
++		dev_info(dev,
++			 "PMI632 SMB5 status observer enabled (read only)\n");
+ 
+ 	return 0;
+ }

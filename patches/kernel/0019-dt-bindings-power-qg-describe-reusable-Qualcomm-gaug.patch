@@ -1,0 +1,79 @@
+From b6dc1b810458f02e0d8e956e66d14b26b6273ef8 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 13:55:08 +0300
+Subject: [PATCH 07/16] dt-bindings: power: qg: describe reusable Qualcomm
+ gauge
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../bindings/power/supply/qcom,pmi632-qg.yaml        | 12 ++++++------
+ MAINTAINERS                                          |  8 ++++++++
+ drivers/power/supply/{qcom_pmi632_qg.c => qcom_qg.c} |  0
+ 3 files changed, 14 insertions(+), 6 deletions(-)
+ rename drivers/power/supply/{qcom_pmi632_qg.c => qcom_qg.c} (100%)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml b/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
+index dced89eee501c..e7dd420c5d7fe 100644
+--- a/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
++++ b/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
+@@ -4,14 +4,14 @@
+ $id: http://devicetree.org/schemas/power/supply/qcom,pmi632-qg.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+ 
+-title: Qualcomm PMI632 QGauge Fuel Gauge
++title: Qualcomm QGauge Fuel Gauge
+ 
+ maintainers:
+   - Marc Lainez <marc.lainez@gmail.com>
+ 
+ description:
+-  The QGauge (QG) block found in the Qualcomm PMI632 PMIC provides battery
+-  fuel gauging through hardware voltage and current FIFO sampling, open
++  The QGauge (QG) block found in Qualcomm PMICs such as PMI632 and PM6150
++  provides battery fuel gauging through hardware voltage and current FIFO sampling, open
+   circuit voltage (OCV) measurement, and coulomb counting. The hardware
+   has a multi-state FSM (S1-S7) that automatically transitions between
+   active sampling and low-power sleep states.
+@@ -21,7 +21,9 @@ allOf:
+ 
+ properties:
+   compatible:
+-    const: qcom,pmi632-qg
++    enum:
++      - qcom,pm6150-qg
++      - qcom,pmi632-qg
+ 
+   reg:
+     maxItems: 1
+@@ -56,8 +58,6 @@ properties:
+ 
+   monitored-battery: true
+ 
+-  power-supplies: true
+-
+ required:
+   - compatible
+   - reg
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 2d8dd1ac557db..ee10a31fdd39c 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -21816,6 +21816,14 @@ F:	Documentation/devicetree/bindings/media/*qcom*
+ F:	drivers/media/platform/qcom
+ F:	include/dt-bindings/media/*qcom*
+ 
++QUALCOMM QGAUGE FUEL GAUGE DRIVER
++M:	Marc Lainez <marc.lainez@gmail.com>
++L:	linux-pm@vger.kernel.org
++L:	linux-arm-msm@vger.kernel.org
++S:	Maintained
++F:	Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
++F:	drivers/power/supply/qcom_qg.c
++
+ QUALCOMM SMB CHARGER DRIVER
+ M:	Casey Connolly <casey.connolly@linaro.org>
+ L:	linux-arm-msm@vger.kernel.org
+diff --git a/drivers/power/supply/qcom_pmi632_qg.c b/drivers/power/supply/qcom_qg.c
+similarity index 100%
+rename from drivers/power/supply/qcom_pmi632_qg.c
+rename to drivers/power/supply/qcom_qg.c

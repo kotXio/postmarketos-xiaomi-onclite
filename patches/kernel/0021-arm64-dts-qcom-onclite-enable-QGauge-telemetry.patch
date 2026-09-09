@@ -1,0 +1,71 @@
+From a3be2aee6a72564142c7ec4ac1b5bfb70f700616 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 7 Sep 2026 13:55:41 +0300
+Subject: [PATCH 09/16] arm64: dts: qcom: onclite: enable QGauge telemetry
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../boot/dts/qcom/sdm632-xiaomi-onclite.dts   | 43 +++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+index cb24075b060c3..6e197e3139d8d 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+@@ -26,6 +26,32 @@ aliases {
+ 		mmc1 = &sdhc_2;
+ 	};
+ 
++	battery: battery {
++		compatible = "simple-battery";
++		device-chemistry = "lithium-ion";
++		charge-full-design-microamp-hours = <3984000>;
++		voltage-min-design-microvolt = <2875900>;
++		voltage-max-design-microvolt = <4400000>;
++
++		/* Coslight light_4000mAh pc-temp-v2 profile at 25 C. */
++		ocv-capacity-celsius = <25>;
++		ocv-capacity-table-0 = <4380500 100>, <4352000 98>, <4324900 96>,
++			<4299100 94>, <4274800 92>, <4251000 90>, <4227300 88>,
++			<4204000 86>, <4181100 84>, <4158600 82>, <4136600 80>,
++			<4115200 78>, <4094200 76>, <4073300 74>, <4052400 72>,
++			<4031900 70>, <4011600 68>, <3991800 66>, <3974000 64>,
++			<3958800 62>, <3942400 60>, <3920300 58>, <3895800 56>,
++			<3876900 54>, <3862500 52>, <3850200 50>, <3839100 48>,
++			<3829100 46>, <3820100 44>, <3811700 42>, <3804100 40>,
++			<3797000 38>, <3790600 36>, <3784600 34>, <3779400 32>,
++			<3774100 30>, <3767900 28>, <3761100 26>, <3753900 24>,
++			<3746400 22>, <3738100 20>, <3728200 18>, <3716500 16>,
++			<3703000 14>, <3691800 12>, <3686500 10>, <3684900 9>,
++			<3682700 8>, <3678400 7>, <3665900 6>, <3629900 5>,
++			<3580000 4>, <3516900 3>, <3429700 2>, <3291100 1>,
++			<2875900 0>;
++	};
++
+ 	chosen {
+ 		#address-cells = <2>;
+ 		#size-cells = <2>;
+@@ -195,6 +221,23 @@ &pm8953_resin {
+ 	status = "okay";
+ };
+ 
++&pmi632_adc {
++	channel@4a {
++		reg = <ADC5_BAT_THERM_100K_PU>;
++		qcom,hw-settle-time = <200>;
++		qcom,pre-scaling = <1 1>;
++		qcom,ratiometric;
++		label = "batt_therm";
++	};
++};
++
++&pmi632_qg {
++	monitored-battery = <&battery>;
++	io-channels = <&pmi632_adc ADC5_BAT_THERM_100K_PU>;
++	io-channel-names = "batt-therm";
++	status = "okay";
++};
++
+ &pmi632_lpg {
+ 	status = "okay";
+ 

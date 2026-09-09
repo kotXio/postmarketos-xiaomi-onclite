@@ -1,5 +1,18 @@
 # Project history
 
+## 2026-09-09 — Battery telemetry
+
+Added cumulative kernel r25 with the complete USB OTG implementation and
+PMI632 QGauge battery reporting:
+
+- standard Linux voltage, current, temperature, health and charge-state data;
+- approximate OCV-based capacity in UPower and Plasma Mobile;
+- live current response across USB cable transitions;
+- persistent microSD boot and cable-free `s2idle`/resume validation.
+
+The implementation observes inherited charger state but does not change
+charger current, voltage or thermal policy.
+
 ## 2026-09-07 — USB OTG
 
 Completed the first reproducible onclite improvement:

@@ -1,24 +1,27 @@
 # Sources and provenance
 
-The USB OTG implementation is project-authored for `xiaomi,onclite`. The
-sources below were used as pinned build inputs or technical references; no
-downstream driver was copied wholesale.
+The USB OTG integration and onclite-specific QGauge follow-ups are
+project-authored for `xiaomi,onclite`. The sources below were used as pinned
+build inputs or technical references; no downstream driver was copied
+wholesale.
 
 ## Pinned build inputs
 
 - Kernel base: [`msm8953-mainline/linux` tag `v7.0.9-r0`](https://github.com/msm8953-mainline/linux/tree/v7.0.9-r0),
   commit `5be94b504b80d032481b90d533ee350ee13850f2`.
-- Kernel review-series result tree:
-  `9c20e5bb67a8d4e6794c9889c4f7ef5b5b321d88`.
+- Cumulative USB OTG and QGauge review-series result tree:
+  `9e11793a7bc4ec6fbe0d267fa19f4fe4f78e8633`.
 - pmaports `v26.06` kernel-package base: commit
   [`2b7f90ea7c2ae4d42ae187dc0b528dc163767b04`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/2b7f90ea7c2ae4d42ae187dc0b528dc163767b04).
 - Userspace patch base: pmaports commit
   [`6aa48aa00aa3b745f26996b45aaf768532ae7b24`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/6aa48aa00aa3b745f26996b45aaf768532ae7b24);
   final review-series tree `81a222e41fad76df7557f9f895d1842f2f5f3d81`.
 
-The exact r16 kernel aport used for the released APK is retained under
+The exact tested r25 and r16 kernel aports are retained under
+[`packages/linux-postmarketos-qcom-msm8953-r25/`](packages/linux-postmarketos-qcom-msm8953-r25/)
+and
 [`packages/linux-postmarketos-qcom-msm8953-r16/`](packages/linux-postmarketos-qcom-msm8953-r16/).
-The logically split review series produces the same kernel source tree.
+The cumulative review series produces the same r25 kernel source tree.
 
 ## Kernel and hardware references
 
@@ -55,9 +58,31 @@ The logically split review series produces the same kernel source tree.
   [USB tethering design](https://gitlab.com/postmarketOS/pmaports/-/merge_requests/3819)
   informed the kernel/userspace boundary.
 
+## Battery references
+
+- Marc Lainez's public
+  [MSM8953 QGauge series](https://github.com/msm8953-mainline/linux/pull/242)
+  supplied the first six QGauge commits. Their original authorship is retained.
+- Xiaomi's official kernel source at commit
+  `fa577bc566886db1e0dfb1ddf66ff7c528148b2b` supplied the Redmi 7
+  [`PMI632` description](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/fa577bc566886db1e0dfb1ddf66ff7c528148b2b/arch/arm64/boot/dts/qcom/pmi632.dtsi),
+  [SDM450/632 integration](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/fa577bc566886db1e0dfb1ddf66ff7c528148b2b/arch/arm64/boot/dts/qcom/sdm450-pmi632.dtsi)
+  and
+  [Coslight `light_4000mAh` profile](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/fa577bc566886db1e0dfb1ddf66ff7c528148b2b/arch/arm64/boot/dts/qcom/qg-batterydata-light-3900mah.dtsi)
+  used for the board data.
+- Qualcomm's public downstream
+  [Qgauge driver](https://android.googlesource.com/kernel/msm.git/+/ed029338e47134f7be5b3242bb222b3ba58974ed/drivers/power/supply/qcom/qpnp-qg.c)
+  was used as a register-behaviour reference for FIFO configuration and live
+  current reads. Its Android SOC and charger policy were not imported.
+- Linux's
+  [power-supply ABI](https://github.com/torvalds/linux/blob/master/Documentation/ABI/testing/sysfs-class-power)
+  defines the exposed property units and current-sign convention.
+
 ## Public verification identifiers
 
-- kernel APK SHA-256:
+- cumulative r25 kernel APK SHA-256:
+  `93b1dca07fb01dc070d766ea94b054d4dd67b4f0bf1b3dd43f33cc509f6e3947`;
+- previous r16 kernel APK SHA-256:
   `3462ccfdede50708f36464d7f5039d40dd22b6979e636d75e9c1ee7a0e828b6d`;
 - tethering APK SHA-256:
   `4b63ac0cbeb2a92f91560200b948f7b3b2ec97502fcea3ac0f66d28abf930231`;

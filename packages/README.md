@@ -1,34 +1,37 @@
 # Packages and installation
 
-Compiled APKs are attached to GitHub Releases, not stored in Git. The first
-binary set is
-[`v2026.09.07-usb-otg`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.07-usb-otg).
+Compiled APKs are attached to GitHub Releases, not stored in Git. The latest
+set is
+[`v2026.09.09-battery`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.09-battery).
 
 | Package | Purpose |
 | --- | --- |
-| `linux-postmarketos-qcom-msm8953-7.0.9-r16.apk` | Cumulative onclite USB OTG kernel. |
-| `postmarketos-base-ui-networkmanager-usb-tethering-51-r2.apk` | Avoid a delayed gadget rebind after the role changed to HOST. |
+| `linux-postmarketos-qcom-msm8953-7.0.9-r25.apk` | Cumulative USB OTG and PMI632 QGauge kernel. |
+| `postmarketos-base-ui-networkmanager-usb-tethering-51-r2.apk` | Avoid a delayed gadget rebind after the role changes to HOST. |
 | `postmarketos-onclite-usb-gadget-lifecycle-1-r0.apk` | Restore the existing NCM gadget after DEVICE returns. |
+
+The two userspace packages are unchanged from the earlier
+[`v2026.09.07-usb-otg`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.07-usb-otg)
+release.
 
 ## Exact compatibility
 
-- Xiaomi Redmi 7 (`xiaomi,onclite`), `aarch64`;
+- Xiaomi Redmi 7 Global (`xiaomi,onclite`, `M1810F6LG`), `aarch64`;
 - postmarketOS `v26.06`, tested with Plasma Mobile;
 - Linux runtime ABI `7.0.9-msm8953`;
-- starting kernel package
-  `linux-postmarketos-qcom-msm8953-7.0.9-r0`;
-- starting tethering package
-  `postmarketos-base-ui-networkmanager-usb-tethering-51-r0`;
-- no pre-existing `postmarketos-onclite-usb-gadget-lifecycle` package.
+- tested upgrade from kernel package
+  `linux-postmarketos-qcom-msm8953-7.0.9-r16`;
+- tethering package `51-r2` and onclite gadget-lifecycle package `1-r0`.
 
-The test installation used root and `/boot` on microSD. The released APKs do
-not contain that installation's UUIDs or a phone-specific boot image, but a
-different storage or software layout has not been validated.
+Root and `/boot` were on microSD during testing. The released APKs contain no
+installation UUIDs or phone-specific boot image. Other storage layouts and
+Redmi 7 variants have not been validated. The persistent upgrade was tested
+from r16; a direct r0-to-r25 installation was not physically tested.
 
 ## Install
 
 Download the three APKs and `SHA256SUMS` from the Release into one empty
-directory. Verify both the files and target before changing packages:
+directory. Verify the files and target:
 
 ```sh
 sha256sum -c SHA256SUMS
@@ -38,36 +41,55 @@ tr '\0' '\n' < /sys/firmware/devicetree/base/compatible |
 uname -m
 uname -r
 apk info -v linux-postmarketos-qcom-msm8953 \
-  postmarketos-base-ui-networkmanager-usb-tethering
+  postmarketos-base-ui-networkmanager-usb-tethering \
+  postmarketos-onclite-usb-gadget-lifecycle
 ```
 
-The expected target is `xiaomi,onclite`, `aarch64`, `7.0.9-msm8953` and the
-two exact starting package versions above. Simulate all three changes together:
+The tested target reports `xiaomi,onclite`, `aarch64`, `7.0.9-msm8953` and
+the package versions above. Simulate the complete set:
 
 ```sh
 sudo apk add --simulate --allow-untrusted \
-  ./linux-postmarketos-qcom-msm8953-7.0.9-r16.apk \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r25.apk \
   ./postmarketos-base-ui-networkmanager-usb-tethering-51-r2.apk \
   ./postmarketos-onclite-usb-gadget-lifecycle-1-r0.apk
 ```
 
-Continue only if the simulation shows the kernel and tethering upgrades, one
-new lifecycle package, and no removals or unrelated changes. Repeat the same
-command without `--simulate`, run `sync`, then reboot with a recovery path
-available.
+Continue only if the simulation shows the expected kernel replacement and no
+removal or unrelated package change. Repeat without `--simulate`, run `sync`,
+then reboot normally with a working recovery path available.
 
-After reboot, confirm DEVICE/NCM first. Test an empty OTG adapter before trying
-a low-power peripheral. Do not use the phone as a supply above `500 mA`.
+After reboot, check the kernel, battery and USB DEVICE mode before trying OTG:
+
+```sh
+apk info -v linux-postmarketos-qcom-msm8953
+uname -r
+cat /sys/class/power_supply/qg-battery/status
+cat /sys/class/power_supply/qg-battery/capacity
+```
+
+Battery capacity is approximate. R25 observes charger state but does not
+configure charging policy. Test an empty OTG adapter before a low-power
+peripheral and do not use the phone as a supply above `500 mA`.
 
 ## Roll back
 
-Use the configured postmarketOS `v26.06` repositories to simulate restoration
-of kernel `7.0.9-r0` and tethering `51-r0`, and simulate removal of the
-onclite lifecycle package. Continue only if no unrelated package changes. If
-those exact versions are unavailable, reinstall the matching official
-postmarketOS image rather than mixing package baselines.
+Download the r16 kernel APK from
+[`v2026.09.07-usb-otg`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.07-usb-otg),
+verify its SHA-256, then simulate replacing r25:
 
-The exact r16 kernel aport is in
+```sh
+sudo apk add --simulate --allow-untrusted \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r16.apk
+```
+
+Continue only if the kernel is the sole package change. Repeat without
+`--simulate`, run `sync` and reboot. The USB userspace packages remain
+compatible with r16 and do not need to be removed.
+
+The exact tested kernel aports are retained under
+[`linux-postmarketos-qcom-msm8953-r25/`](linux-postmarketos-qcom-msm8953-r25/)
+and
 [`linux-postmarketos-qcom-msm8953-r16/`](linux-postmarketos-qcom-msm8953-r16/).
-The userspace package sources are introduced by the two pmaports patches under
+The userspace sources are introduced by the two patches under
 [`../patches/pmaports/`](../patches/pmaports/).
