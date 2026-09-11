@@ -1,0 +1,31 @@
+From d13e61dac9c8f7a4c17d1c568414da65c2061da6 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Fri, 11 Sep 2026 11:26:48 +0300
+Subject: [PATCH 39/43] arm64: dts: qcom: onclite: Add AW87329 probe
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+index c00b5f2468c95..2739dc4620cef 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+@@ -175,6 +175,16 @@ &hsusb_phy {
+ 	status = "okay";
+ };
+ 
++&i2c_5 {
++	status = "okay";
++
++	speaker_amp: amplifier@58 {
++		compatible = "awinic,aw87329";
++		reg = <0x58>;
++		reset-gpios = <&tlmm 139 GPIO_ACTIVE_LOW>;
++	};
++};
++
+ &i2c_3 {
+ 	status = "okay";
+ 

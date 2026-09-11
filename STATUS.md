@@ -4,9 +4,9 @@ Last updated: 2026-09-11
 
 Tested on one Xiaomi Redmi 7 (`onclite`), `aarch64`, with postmarketOS
 `v26.06`, Plasma Mobile and Linux `7.0.9-msm8953`. The current configuration
-uses persistent cumulative kernel package `7.0.9-r28`, Sensor Registry package
-pair `0.1_git20250706-r4`, tethering package `51-r2` and onclite
-gadget-lifecycle package `1-r0`.
+uses persistent cumulative kernel package `7.0.9-r31`, UCM package `19-r4`,
+Sensor Registry package pair `0.1_git20250706-r4`, tethering package `51-r2`
+and onclite gadget-lifecycle package `1-r0`.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -21,8 +21,11 @@ gadget-lifecycle package `1-r0`.
 | Bluetooth | Partial | Controller is powered and exposed; device connection and Bluetooth audio have not been tested. |
 | Cellular modem | Partial | Modem control and radio visibility work; calls, SMS and mobile data are unverified. |
 | GNSS | Unverified | ModemManager exposes GPS capabilities; no position fix has been verified. |
-| Earpiece and microphones | Unverified | ALSA/UCM routes exist; physical playback and recording have not been tested. |
-| Bottom speaker | Not working | The external AW87329 amplifier is unsupported by the current mainline port. |
+| Earpiece | Not working | Four PulseAudio and direct ALSA tests were silent; current evidence cannot distinguish incomplete routing or amplification from a failed physical earpiece. |
+| Mic1 | Working | The `ADC1 -> DEC1` route captured normal audible voice, but it was quieter and noisier than Mic2. |
+| Mic2 | Working | The cleaner and slightly louder internal microphone is the Plasma Mobile default source. |
+| Headset microphone | Unverified | Its UCM route remains available but has not been physically tested. |
+| Bottom speaker | Working | The AW87329 route provides clear playback and returns the amplifier to reset while idle. |
 | Hardware video codec | Partial | Qualcomm Venus decoder/encoder V4L2 nodes exist; frame decode and encode are unverified. |
 | Battery telemetry | Working | QGauge reports presence, voltage, current, temperature, health, status, design data and approximate capacity through Linux, UPower and Plasma. |
 | Charging control | Partial | Charging state is visible and cable transitions were tested, but Linux does not configure current, voltage, JEITA, HVDCP or watchdog policy. |

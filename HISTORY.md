@@ -1,5 +1,14 @@
 # Project history
 
+## 2026-09-11 — Main speaker and Mic2
+
+Added cumulative kernel r31 and UCM r4:
+
+- AW87329 bottom-speaker support with the onclite hardware route;
+- fail-closed reset handling on idle, faults, suspend and shutdown;
+- PCM-scoped amplifier control through UCM;
+- `HiFi (Mic2, Speaker)` as the Plasma Mobile default profile.
+
 ## 2026-09-11 — Sensor Manager
 
 Added cumulative kernel r28 and the `sns-reg r4` package pair:

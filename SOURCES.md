@@ -1,9 +1,10 @@
 # Sources and provenance
 
 The USB OTG integration, onclite-specific QGauge follow-ups, Sensor Manager
-corrections and Sensor Registry additions are project-authored for
-`xiaomi,onclite`. Imported work retains its original authorship. The sources
-below were used as pinned build inputs or technical references.
+corrections, Sensor Registry additions and AW87329 audio support are
+project-authored for `xiaomi,onclite`. Imported work retains its original
+authorship. The sources below were used as pinned build inputs or technical
+references.
 
 ## Pinned build inputs
 
@@ -13,6 +14,11 @@ below were used as pinned build inputs or technical references.
   `9e11793a7bc4ec6fbe0d267fa19f4fe4f78e8633`.
 - Cumulative USB OTG, QGauge and Sensor Manager result tree:
   `4fbd4ef990345acae246dcfa6a54124ef4968ce8`.
+- Cumulative USB OTG, QGauge, Sensor Manager and AW87329 result tree:
+  `61065c7f576be21329fa75313c31ade5b7f5b409`.
+- ALSA UCM base:
+  [`msm8953-mainline/alsa-ucm-conf`](https://github.com/msm8953-mainline/alsa-ucm-conf/tree/ed9334bda853fe032794751c34cea03ec0d7d4eb),
+  commit `ed9334bda853fe032794751c34cea03ec0d7d4eb`.
 - Sensor Registry base:
   [`msm8996-mainline/sns-reg`](https://gitlab.com/msm8996-mainline/sns-reg)
   commit `4d238e5f0baba3fb77456fe2bffbf8e8f18a71a0`; six-patch result tree
@@ -23,13 +29,16 @@ below were used as pinned build inputs or technical references.
   [`6aa48aa00aa3b745f26996b45aaf768532ae7b24`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/6aa48aa00aa3b745f26996b45aaf768532ae7b24);
   final review-series tree `81a222e41fad76df7557f9f895d1842f2f5f3d81`.
 
-The r28, r25 and r16 release aports are retained under
+The r31, r28, r25 and r16 release aports are retained under
+[`packages/linux-postmarketos-qcom-msm8953-r31/`](packages/linux-postmarketos-qcom-msm8953-r31/),
 [`packages/linux-postmarketos-qcom-msm8953-r28/`](packages/linux-postmarketos-qcom-msm8953-r28/),
 [`packages/linux-postmarketos-qcom-msm8953-r25/`](packages/linux-postmarketos-qcom-msm8953-r25/)
 and
 [`packages/linux-postmarketos-qcom-msm8953-r16/`](packages/linux-postmarketos-qcom-msm8953-r16/).
 The exact `sns-reg r4` aport is retained under
 [`packages/sns-reg-r4/`](packages/sns-reg-r4/).
+The UCM r4 aport is retained under
+[`packages/soc-qcom-msm8953-ucm-r4/`](packages/soc-qcom-msm8953-ucm-r4/).
 
 ## Kernel and hardware references
 
@@ -119,8 +128,32 @@ The stock `persist/sensors/sns.reg` and the generated runtime registry remain
 on their own phone. No calibration value, handset identifier or proprietary
 sensor configuration is distributed here.
 
+## Audio references
+
+- LineageOS onclite kernel commit
+  [`8aab452e`](https://github.com/LineageOS/android_kernel_xiaomi_onclite/tree/8aab452e4acd7cb9bcbd173a3db0fec443b35521)
+  and its
+  [`aw87329_audio.c`](https://github.com/LineageOS/android_kernel_xiaomi_onclite/blob/8aab452e4acd7cb9bcbd173a3db0fec443b35521/techpack/audio/asoc/codecs/aw87329_audio.c)
+  were used to identify the chip, reset line, stock register order and profile
+  naming.
+- The public
+  [`aw87xxx` family driver](https://github.com/gtxaspec/aw87xxx) provided an
+  additional family-level reference.
+- The public MSM8953
+  [ALSA UCM configuration](https://github.com/msm8953-mainline/alsa-ucm-conf/tree/ed9334bda853fe032794751c34cea03ec0d7d4eb)
+  is the base for the onclite selector, HiFi route and Speaker PCM.
+
+The downstream drivers were used as references. Patches `0037..0043` provide
+a new small ASoC implementation with strict profile validation and
+fail-closed reset handling. The proprietary `aw87329_kspk.bin` remains on its
+own phone and is not distributed.
+
 ## Public verification identifiers
 
+- cumulative r31 kernel APK SHA-256:
+  `98ab1af8e97529de56398b531a0831a04b4973a10b2209aa4d5eda1ffbf7d14f`;
+- UCM r4 APK SHA-256:
+  `81af34d8c608510b2aaf39c88bdb3082d09ddd1c0847514e858fd08098357acc`;
 - cumulative r28 kernel APK SHA-256:
   `62c63eb1e77f2b8937195a1eaf998b23219eeb9e8b379df0ca3d2f0841309977`;
 - Sensor Registry r4 APK SHA-256:

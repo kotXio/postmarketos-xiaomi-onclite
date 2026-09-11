@@ -1,0 +1,152 @@
+# Kernel config based on: defconfig, msm8953.config, and device configs
+maintainer="Barnabas Czeman <barnabas.czeman@postmarketos.org>"
+_flavor="postmarketos-qcom-msm8953"
+pkgname=linux-$_flavor
+pkgver=7.0.9
+pkgrel=31
+pkgdesc="Close to mainline linux kernel for Qualcomm Snapdragon MSM8953"
+arch="aarch64"
+_carch="arm64"
+url="https://github.com/msm8953-mainline/linux"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps
+	pmb:cross-native
+	pmb:kconfigcheck-community
+"
+makedepends="
+	bison
+	clang
+	findutils
+	flex
+	lld
+	llvm
+	openssl-dev
+	perl
+	postmarketos-installkernel
+	python3
+"
+
+_tag="$pkgver-r0"
+
+source="
+	$pkgname-v$_tag.tar.gz::$url/archive/v$_tag.tar.gz
+	config-$_flavor.aarch64
+	0001-Add-PMI632-micro-USB-RID-diagnostics.patch
+	0002-Add-PMI632-automatic-USB-role-switching.patch
+	0003-usb-dwc3-reset-onclite-core-before-host-exit.patch
+	0004-usb-qcom-power-onclite-VBUS-in-host-mode.patch
+	0005-usb-qcom-verify-fixed-onclite-VBUS-current.patch
+	0006-usb-dwc3-reset-onclite-after-host-disconnect.patch
+	0007-usb-xhci-quiesce-onclite-before-host-removal.patch
+	0008-usb-xhci-keep-onclite-reset-at-primary-stop.patch
+	0009-usb-dwc3-reset-onclite-after-xHCI-removal.patch
+	0010-dt-bindings-usb-qcom-describe-PMI632-VBUS-fault-IRQs.patch
+	0011-arm64-dts-qcom-onclite-add-VBUS-fault-IRQs.patch
+	0012-usb-qcom-fail-closed-on-PMI632-VBUS-faults.patch
+	0013-iio-adc-qcom-spmi-adc5-add-missing-ADC5_BAT_THERM_10.patch
+	0014-dt-bindings-power-supply-add-Qualcomm-PMI632-QGauge-.patch
+	0015-power-supply-add-Qualcomm-PMI632-QGauge-fuel-gauge-d.patch
+	0016-arm64-dts-qcom-pmi632-add-QGauge-fuel-gauge-node.patch
+	0017-power-supply-qcom_pmi632_qg-fix-current_now-sign-con.patch
+	0018-power-supply-qcom_pmi632_qg-use-fwnode-API-for-power.patch
+	0019-dt-bindings-power-qg-describe-reusable-Qualcomm-gaug.patch
+	0020-power-supply-qcom_qg-address-initial-review.patch
+	0021-arm64-dts-qcom-onclite-enable-QGauge-telemetry.patch
+	0022-power-supply-qcom_qg-consume-pending-FIFO-after-IRQ-setup.patch
+	0023-power-supply-qcom_qg-add-reset-surviving-IRQ-checkpoints.patch
+	0024-power-supply-qcom_qg-use-configured-FIFO-IRQ-length.patch
+	0025-dt-bindings-power-supply-qcom-qg-describe-PMI632-sta.patch
+	0026-power-supply-qcom_qg-report-PMI632-charger-state.patch
+	0027-arm64-dts-qcom-onclite-enable-PMI632-status-observer.patch
+	0028-power-supply-qcom_qg-report-live-current-registers.patch
+	0029-net-qrtr-smd-Rename-qdev-to-qsdev.patch
+	0030-net-qrtr-Turn-QRTR-into-a-bus.patch
+	0031-net-qrtr-Define-macro-to-convert-QMI-version-and-ins.patch
+	0032-iio-Add-Qualcomm-Sensor-Manager-driver.patch
+	0033-iio-qcom-smgr-Fix-sensor-array-access.patch
+	0034-iio-qcom-smgr-Add-typed-QMI-release-action.patch
+	0035-iio-qcom-smgr-Fix-buffering-item-length-storage.patch
+	0036-iio-qcom-smgr-Add-ambient-light-stream.patch
+	0037-dt-bindings-sound-Add-Awinic-AW87329.patch
+	0038-ASoC-codecs-Add-AW87329-probe-driver.patch
+	0039-arm64-dts-qcom-onclite-Add-AW87329-probe.patch
+	0040-dt-bindings-sound-Add-AW87329-firmware-profile.patch
+	0041-ASoC-codecs-aw87329-Add-speaker-playback.patch
+	0042-arm64-dts-qcom-onclite-Route-AW87329-speaker.patch
+	0043-ASoC-codecs-aw87329-Default-speaker-enable-to-off.patch
+"
+builddir="$srcdir/linux-$_tag"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/config-$_flavor.$arch" .config
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" LLVM=1 \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1 ))-$_flavor"
+}
+
+package() {
+	mkdir -p "$pkgdir"/boot
+
+	make zinstall modules_install dtbs_install \
+		ARCH="$_carch" \
+		LLVM=1 \
+		INSTALL_PATH="$pkgdir"/boot \
+		INSTALL_MOD_PATH="$pkgdir"/usr \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir/boot/dtbs"
+	rm -f "$pkgdir"/usr/lib/modules/*/build "$pkgdir"/usr/lib/modules/*/source
+
+	install -Dm644 "$builddir/include/config/kernel.release" \
+		"$pkgdir/usr/share/kernel/$_flavor/kernel.release"
+}
+sha512sums="
+660bb93c2d19efe27a0c19a795801cbbf092f19589b96a857e320345b406a887498a0ab6b0e435b3ef5c244f5c193f82c8a61876853f3a6c1cf0932632d00c5f  linux-postmarketos-qcom-msm8953-v7.0.9-r0.tar.gz
+b45dbdab023f0390d630346cc96a252692289fb625ee0ac7b49276532852c3b0db27c6a7cdbd72699c5007729c4be955b96f5aa1c97ce742a48c80defc54c222  config-postmarketos-qcom-msm8953.aarch64
+a2005751eab685ed877b288c87c6f1cf23cb2193e4cd6632467422a3583fcee351e62c9f42dd247465236e3989c46e672f4df93b307da8a943920c995302b720  0001-Add-PMI632-micro-USB-RID-diagnostics.patch
+1cec8fd07c40917c62c744e4d8dc64e84211dd4188cf18dd15d180dc7081f304be2b9bdbf4c8de4cddda8213933816684a6fe8e8ca0319cbe95d0d3c9349ebff  0002-Add-PMI632-automatic-USB-role-switching.patch
+7b554ab68d78cf52e2adba2ae28d2eb1863bebebeeae6c71ea2cf27277563bfd6f8ef8782b532a539633601de1d9e955ec750a95849fde677b4603816597f69a  0003-usb-dwc3-reset-onclite-core-before-host-exit.patch
+d9c089e061f323f5d78b50c6a70270060a1ddc2b90d0eac73cef4e832c29e58f844eac2300942fd0af91b119583fe8fcd89a4a4af8e919881792759e2527e112  0004-usb-qcom-power-onclite-VBUS-in-host-mode.patch
+4df1cadf724118c337984860cbb1707b466c46286c9900cb49d02f7f84cb02c3f7f64de56e0c2b8ac4c74ef82b1f6e133c032b60ad50478dd06fc0fd0821d87b  0005-usb-qcom-verify-fixed-onclite-VBUS-current.patch
+06e6f27abe108daf8a15683319166ddf6cf3f8c39415e96a440a92afb7f108d044a245fcd33b0f22d3c85e8cd796b10b9cc2e158fc69247e6ef42aba775fc35e  0006-usb-dwc3-reset-onclite-after-host-disconnect.patch
+3a034f893c554c59017c5c77bdb43f137faee76716a5d15f64ae700b8ea15bd1e6957661afe2ddd37cc184c5b2e23c23d3df78a6fdc2ff1a3fc95252b1e2cde7  0007-usb-xhci-quiesce-onclite-before-host-removal.patch
+6361d1ea226cad3d4826db9f4f034f3a9d387cdc596292af279c52cba0ad4f1688ea89846e679493f5bf84e4a7fcf323e2fa0bd64e6f802edad64be15e45127a  0008-usb-xhci-keep-onclite-reset-at-primary-stop.patch
+d78019103f5264ca5af7127946536d15dff3a5f820d27b2892b5b78f131176a71d180de0e606b67b355714c9c7f3a4aeada61132cdd239dff5790fa40044ca40  0009-usb-dwc3-reset-onclite-after-xHCI-removal.patch
+06ca6373eaa2754785135a1569d9952780103d037136fde7a1aac7a184b51f4f0f53e66f022a5ecb4d3fa1c2817077f6b9f9d9833b9adb382bd85023647cbfcc  0010-dt-bindings-usb-qcom-describe-PMI632-VBUS-fault-IRQs.patch
+19ca67ad912f16b074d5e7582376bffd2b0b4c95a58e6a847f2d183bb9f82fd1e8e6da840dd3a85e126c8c5568e76f1d89eb4c720efe063d53658894c42e78c3  0011-arm64-dts-qcom-onclite-add-VBUS-fault-IRQs.patch
+fe70e1c9c94dee8c56be252f90a955f14486b86e7ff156754492a8202e253286f7cf402f3c29e84cb9decd2efcfa44ad334aa4f6ec0126b0fcdcc560f8356858  0012-usb-qcom-fail-closed-on-PMI632-VBUS-faults.patch
+3ba3808c24ffca3c71746f30f162e1b7a0ce329dffd3fa3b1e0113d189c9254e7cb6220c7369475e05f3f417dab581bf0e0c8a92fef89fc1f3ddc33e9b412646  0013-iio-adc-qcom-spmi-adc5-add-missing-ADC5_BAT_THERM_10.patch
+9d589ce7ae4e911bb28aa94c709821bcc0747b46129b9123a872d444b8649a194f1b4578bbaeeca06f242d0a27d7323336688e6aa54cb9f02b35a7c275a82016  0014-dt-bindings-power-supply-add-Qualcomm-PMI632-QGauge-.patch
+12c0342b9d5f0dc857e2f0e2df112bcbe79a87ae0c5f068872f75807840f5459c581e5806915f4076b6edeb10ba538304b9a4862e509522a7b434e999a499682  0015-power-supply-add-Qualcomm-PMI632-QGauge-fuel-gauge-d.patch
+18f1c31242cf2ba5066628e9b7524b16f6aa228eb790552e125aa79f7c1b525740e814d7194dcbf1185f759f9d81bdcb3d852ebc4b3caf77143d6063fab1a74a  0016-arm64-dts-qcom-pmi632-add-QGauge-fuel-gauge-node.patch
+6b1ecabfb3549c851223ed9d88ddaa44e73dff8ba38246b1a6a8d58b347dd3150a93564de0e1b719b7bccd97b88ab4fe870ccdb3f5ba53f33f5ef38f3aa9036f  0017-power-supply-qcom_pmi632_qg-fix-current_now-sign-con.patch
+3412260c4763aac054a9e06c5b949509f8dea25df70160ac6e56b6ac90cce4c93b3103ee6cdf186b85d711490d3b252ba36192cfba148e1010e7974be1869c90  0018-power-supply-qcom_pmi632_qg-use-fwnode-API-for-power.patch
+789f4de00ac35da20cb169f2cc1b081e058b31beb372ed609e6ada2722063e9ffc93a7f2f24223b732c777a560973f2b29d92a24c739b4ea811523f1a62736e4  0019-dt-bindings-power-qg-describe-reusable-Qualcomm-gaug.patch
+5bdd5bfb1d6be15d625b2977006d5f6101e755e1406eb372bb831d688f97bd9f070c215d5dfdb2bbd3b3969d03439bb269c9791603e87880ec7a98c7f1d3e645  0020-power-supply-qcom_qg-address-initial-review.patch
+ebff41faffd43f34c0eb121d3c14cd09fbddb7c349fd4a808441492d5e2b02c63e48f4677e2d52353caa66c4e87b75ae015e8d72e9d360b76c17f1733ac4965c  0021-arm64-dts-qcom-onclite-enable-QGauge-telemetry.patch
+2d74c6ea88cd1ae225d6ec401624ab72a218702ffb4f3df53b3a42e684adc590ead431cd61f5fb8b928744783b3cb35c179c15229c09c1f3516aa62f0481c451  0022-power-supply-qcom_qg-consume-pending-FIFO-after-IRQ-setup.patch
+e72f7f5d3d439a2f8a18ca8b7a32755a1ff40a293dbe9f079f5c2d52acf21b3f7720d592511441459250848f096b1322a7367f3b9e02ec3f8f8cd1c61664164a  0023-power-supply-qcom_qg-add-reset-surviving-IRQ-checkpoints.patch
+a40e19c3ebf11f01e5bd2e0f48c36a6edad9c8158eddb0269b6ed6026dcab7cfe793d85a9ee96e1863c611c17abd022eb4b04b9ccca1f7a423d0d78307bb3cd9  0024-power-supply-qcom_qg-use-configured-FIFO-IRQ-length.patch
+7e3dfacd8071bbd75d014d107f43a1269b5a580eb7621f6d286769a91dbed7000432e9e2272530cda6f15f68943a08f37ed1a2112ef5ce68430b3b20754d51eb  0025-dt-bindings-power-supply-qcom-qg-describe-PMI632-sta.patch
+869f35776cb3d291bc9ddf8a62ff297081bfdfa95b63fd02531914aad62ebc1fbb7b556823e65668e49c5b2cf4b667a07bfcfc42e39bbe17967d551588e0879b  0026-power-supply-qcom_qg-report-PMI632-charger-state.patch
+da61022041b2d671960387de319e763b606e0a6012a31a5a734950a0e959d5410b09c558ded0366039fd2983a3aff3456999b705ce00f57a90f4d37afea54846  0027-arm64-dts-qcom-onclite-enable-PMI632-status-observer.patch
+8344ada77238636031b9e1942a679400cefc077490d7da3f1cfc448a9c11804d0333b2ca564cd4c1aa0b5f7541c053c64c93f3f0f6f94f6439a35dfa8b51fe2c  0028-power-supply-qcom_qg-report-live-current-registers.patch
+dfe197d8adba177e1043985b177d5d0d3fe1268785f9bbceb4ab91c1edc43dab62bea2a2e56fa964298d0eeab8623a35df51efd6137a209748b3c9ab4c25d7b4  0029-net-qrtr-smd-Rename-qdev-to-qsdev.patch
+7c4b087e176ffc7469da817a4ccc58579ac76081bedc786cd7e903ddba2939881ff9cb4f86b154364635cba7a8bdf997d56918a9ced2a773d187a7ac76729dc3  0030-net-qrtr-Turn-QRTR-into-a-bus.patch
+3d44d285b9b6f68186c189adaee1fafc2f0b0ecb425e5637519b906c2b607740c3511787a4a5f461dadef98c201b515b443fb19a0673be6b26c55816c92f57e5  0031-net-qrtr-Define-macro-to-convert-QMI-version-and-ins.patch
+65a680d9ed8c49198b7737dd949f7a433ecc9ad455c7825eb289e99b9f3d27622ac90ee749f8009b2730743fef03cda55d6021cc388eac602df0cd4859fbd9d5  0032-iio-Add-Qualcomm-Sensor-Manager-driver.patch
+96d0dc34a6651a65f007c7493ef3d2554f0f85f69f6a2c84665ba33a5f571bfdfcaeca380c61e3e0be6380fb9131c2f9f13e98e8c876d1025ea327e66232ad45  0033-iio-qcom-smgr-Fix-sensor-array-access.patch
+d2be6809226770035e76bdc0f1cfaaa7942fc4c888c1d5e7cd6b8d6c46da1ce2e4f5209d027989fc60e5ccda1cad653b0229f5b192a0b75b55a39b719443c393  0034-iio-qcom-smgr-Add-typed-QMI-release-action.patch
+216f3a7c94af101c05d6094d467558f6f718ef7e33bbd94b85159451e6d62bfc193bd106f093f61f9eac08ae134a2c7a0ed1ffa7c0238ed926200230293f7d1a  0035-iio-qcom-smgr-Fix-buffering-item-length-storage.patch
+00b40323fb94c4f0d8fed25b5c6e44534f3a961d783e26413a90b4bedee52ece11fcb516331c13909bd5b0c6b30a6e7ab0051569264aa51d9661a947c62ab5f1  0036-iio-qcom-smgr-Add-ambient-light-stream.patch
+0cf322bb594bb70d1d80159075f2ff473fe282f4e37122d24ff7a8486454654cb558a5738d18ef763ee9903d6880d7044661cc8aa2105dc56f8eb06ca8407241  0037-dt-bindings-sound-Add-Awinic-AW87329.patch
+c075fc9221f5167645ff0e2b85377477dac690621e13b1dad2fafb56e82c087fafbbba89c6f9dcbe6017a298ef5b430e26fc3daa679a9f34fe1164e406c9bc4b  0038-ASoC-codecs-Add-AW87329-probe-driver.patch
+9722de2a2afe9aa93739634087f81191770bb0e01cad85eccf4159a4603259e530a263e1db76f5039a49793cadbbea25b9e8dad993de5b738e36728c134ea810  0039-arm64-dts-qcom-onclite-Add-AW87329-probe.patch
+233f1ed81b36f790bee1759c5dd7a7efc2ac3c7b06648bed3928ed9b990a6ef2ab57e1e3d7b93da938ee6bfeb5fb0710b6b441789ddd3110c7a1081eba093be2  0040-dt-bindings-sound-Add-AW87329-firmware-profile.patch
+b121aa3dc9d0c5fe5b5e07aa40b04ae9228a781c944f1e386eb1fcad6ec4a5ca21492333559055825374c4115980670b0016cc1aea44f5294368aad037707eaf  0041-ASoC-codecs-aw87329-Add-speaker-playback.patch
+b8a777a4a056d485c26f9597c7c3fb5e185d267cb42ec5d556f413ac6335f709ffeab3323dab7fedb14b18ebf56756b185b37ca621c0e8286042ade5df88d45c  0042-arm64-dts-qcom-onclite-Route-AW87329-speaker.patch
+bf074f770eb8e16ba80554ed99862627d07c4be71954e5b813b2669fa034ed3313ef8900d973b254fdb36c441c9090eb4bc88034d08d1d004af349c2d5b71bf1  0043-ASoC-codecs-aw87329-Default-speaker-enable-to-off.patch
+"

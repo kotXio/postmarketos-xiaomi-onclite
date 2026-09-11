@@ -34,6 +34,13 @@ eac0c2daa214d875e1ea8f7fc68b7f0da755babcfd190baac89c08aa3c126c8c  kernel/0031-ne
 7836a0702a7baad3b8bb07902df24ec74c9542f20346dccd47972102332485bc  kernel/0034-iio-qcom-smgr-Add-typed-QMI-release-action.patch
 d15726ad68278bf3c8d6c5a22233048b8ff42da6a8303f86a908975fec3ec163  kernel/0035-iio-qcom-smgr-Fix-buffering-item-length-storage.patch
 f9a447fcd47d1590711aa8f3053f113eed9615035a4a46fb3b2476a5525d657e  kernel/0036-iio-qcom-smgr-Add-ambient-light-stream.patch
+ed686562c4ffa28715f4178f47a47ba50418e9abad548fd939f2f7fd2bf78b61  kernel/0037-dt-bindings-sound-Add-Awinic-AW87329.patch
+8491d8d1883f4a53d925b445e55fbf72ec5760eb9b1244483c554868dbe897f5  kernel/0038-ASoC-codecs-Add-AW87329-probe-driver.patch
+c22e2ff52b5610dda67c1eb2663ad134a22eda2970169110a9d9f57a9549c354  kernel/0039-arm64-dts-qcom-onclite-Add-AW87329-probe.patch
+3d2f3038448f1ce844ad5a9968320a83a005c2434f96232d79d4bed9d38caf6d  kernel/0040-dt-bindings-sound-Add-AW87329-firmware-profile.patch
+863dae9209481de7897cbddfbd9f1e0e106daa3271f343f50fb0d2a1fcc71915  kernel/0041-ASoC-codecs-aw87329-Add-speaker-playback.patch
+4ce308915420317485d1f947f7a3dfd38474274753d0eba8a84382c86ca35c59  kernel/0042-arm64-dts-qcom-onclite-Route-AW87329-speaker.patch
+b463e56351d5d24776d971a99baac5f8bc700c74acc956d09e4cd68944127c45  kernel/0043-ASoC-codecs-aw87329-Default-speaker-enable-to-off.patch
 3989a2c8b7dc44ff90652fbe0b174eced524154cd937943d21aff65478937933  sns-reg/0001-parser-Accept-C-style-registry-values.patch
 e2fb52f64c270916524565412d74ceee1a714f2fc676660d0650340849ca4fcc  sns-reg/0002-parser-Store-registry-values-as-uint64_t.patch
 c0bcf99b8fb996e8bf99a6e60b095156e517e50ceccda2b7f356444bd9f945d5  sns-reg/0003-generator-Guard-padding-registry-keys.patch

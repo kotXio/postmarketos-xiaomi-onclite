@@ -34,14 +34,17 @@ owner can reproduce the work safely.
 - LIS2HH accelerometer, AK09918 magnetometer and stk3x3x proximity and ambient
   light streams through Qualcomm Sensor Manager and Linux IIO.
 - Plasma Mobile automatic rotation through the standard SensorProxy service.
+- AW87329 bottom-speaker playback with fail-closed amplifier control.
+- Mic2 as the default Plasma Mobile recording source.
 
 ## Release
 
 The latest binary release is
-[`v2026.09.11-sensors`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-sensors).
-It contains cumulative kernel r28 and the `sns-reg r4` package pair. It is for
-Xiaomi Redmi 7 (`onclite`), `aarch64`, postmarketOS `v26.06` and Linux
-`7.0.9-msm8953`, starting from the previously released r25 USB/QGauge stack.
+[`v2026.09.11-audio`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-audio).
+It contains cumulative kernel r31 and UCM r4 for the AW87329 bottom speaker
+and default Mic2 capture. It is for Xiaomi Redmi 7 (`onclite`), `aarch64`,
+postmarketOS `v26.06` and Linux `7.0.9-msm8953`, starting from the previously
+released r28 Sensor Manager stack.
 
 Read the exact compatibility, installation and rollback in
 [`packages/README.md`](packages/README.md) before using it.
@@ -61,6 +64,13 @@ Read the exact compatibility, installation and rollback in
 - Proximity and ambient light are working sensor streams; call-screen blanking
   and automatic-brightness policy are separate userspace work.
 - No gyroscope or Hall device is reported by this phone's Sensor Manager.
+- Earpiece playback is silent; current evidence cannot distinguish an
+  incomplete software route or amplification path from a failed physical
+  earpiece.
+- Mic1 works but was quieter and noisier than Mic2 in the matched recording
+  test. Wired-headset audio has not been physically verified.
+- The proprietary AW87329 profile is not distributed; each phone must expose
+  its own stock `aw87329_kspk.bin` through the firmware loader.
 
 ## Licensing
 

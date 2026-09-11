@@ -1,0 +1,41 @@
+From 91334f9f4b267f43e4e16b75f78548089810917e Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Fri, 11 Sep 2026 13:06:36 +0300
+Subject: [PATCH 40/43] dt-bindings: sound: Add AW87329 firmware profile
+
+---
+ .../devicetree/bindings/sound/awinic,aw87329.yaml     | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/sound/awinic,aw87329.yaml b/Documentation/devicetree/bindings/sound/awinic,aw87329.yaml
+index 5e14eaf5de625..a04a1d0ab057a 100644
+--- a/Documentation/devicetree/bindings/sound/awinic,aw87329.yaml
++++ b/Documentation/devicetree/bindings/sound/awinic,aw87329.yaml
+@@ -31,10 +31,20 @@ properties:
+ 
+   sound-name-prefix: true
+ 
++  firmware-name:
++    maxItems: 1
++    description: |
++      Name of the speaker profile firmware. The file contains exactly eleven
++      bytes, one for each register from 0x00 through 0x0a. Byte zero must
++      contain the immutable chip ID 0x39 and is validated but never written.
++      The remaining bytes are programmed only while the speaker DAPM path is
++      active.
++
+ required:
+   - compatible
+   - reg
+   - reset-gpios
++  - firmware-name
+ 
+ additionalProperties: false
+ 
+@@ -51,5 +61,6 @@ examples:
+             reg = <0x58>;
+             reset-gpios = <&tlmm 139 GPIO_ACTIVE_LOW>;
+             sound-name-prefix = "Speaker Amp";
++            firmware-name = "aw87329_kspk.bin";
+         };
+     };

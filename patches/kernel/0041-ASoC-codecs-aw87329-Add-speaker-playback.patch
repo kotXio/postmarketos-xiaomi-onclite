@@ -1,0 +1,355 @@
+From f2f3d052aae8406d075590014cc9692276c6a8da Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Fri, 11 Sep 2026 13:06:36 +0300
+Subject: [PATCH 41/43] ASoC: codecs: aw87329: Add speaker playback
+
+---
+ sound/soc/codecs/Kconfig   |   8 +-
+ sound/soc/codecs/aw87329.c | 238 +++++++++++++++++++++++++++++++++++--
+ 2 files changed, 231 insertions(+), 15 deletions(-)
+
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 8a9626987343b..0ff046d966964 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -667,10 +667,10 @@ config SND_SOC_AW87329
+ 	select GPIOLIB
+ 	select REGMAP_I2C
+ 	help
+-	  Enable probe support for the Awinic AW87329 analog-input audio
+-	  amplifier. The initial driver verifies the I2C chip ID and leaves the
+-	  amplifier disabled in hardware reset. Audio profile programming is
+-	  intentionally not enabled yet.
++	  Enable support for the Awinic AW87329 analog-input audio amplifier.
++	  The driver loads a board-provided speaker profile, validates it and
++	  programs the amplifier when its DAPM playback path is active. The
++	  amplifier remains disabled in hardware reset at all other times.
+ 
+ config SND_SOC_AW8738
+ 	tristate "Awinic AW8738 Audio Amplifier"
+diff --git a/sound/soc/codecs/aw87329.c b/sound/soc/codecs/aw87329.c
+index 40f4b9c8c74ce..f39dd9c7bb558 100644
+--- a/sound/soc/codecs/aw87329.c
++++ b/sound/soc/codecs/aw87329.c
+@@ -1,24 +1,42 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * Probe-only driver for the Awinic AW87329 analog-input audio amplifier.
++ * Driver for the Awinic AW87329 analog-input audio amplifier.
+  *
+  * Copyright (c) 2026 Kostiantyn Andriiuk
+  */
+ 
+ #include <linux/delay.h>
++#include <linux/firmware.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
++#include <linux/string.h>
++#include <sound/soc.h>
+ 
+ #define AW87329_REG_CHIP_ID	0x00
++#define AW87329_REG_SYSCTRL	0x01
+ #define AW87329_CHIP_ID		0x39
++#define AW87329_CHIP_DISABLE	0x08
+ #define AW87329_MAX_REGISTER	0x0a
+-#define AW87329_ID_RETRIES	5
++#define AW87329_PROFILE_SIZE	(AW87329_MAX_REGISTER + 1)
++#define AW87329_SYSCTRL_PROGRAM_MASK	0xf7
++#define AW87329_IO_RETRIES	5
++#define AW87329_RETRY_US_MIN	2000
++#define AW87329_RETRY_US_MAX	2500
+ 
+ struct aw87329 {
++	struct device *dev;
+ 	struct gpio_desc *reset_gpio;
+ 	struct regmap *regmap;
++	/* Serializes DAPM power transitions and profile loading. */
++	struct mutex lock;
++	const char *firmware_name;
++	u8 speaker_profile[AW87329_PROFILE_SIZE];
++	bool profile_loaded;
++	bool enabled;
+ };
+ 
+ static const struct regmap_config aw87329_regmap_config = {
+@@ -36,27 +54,207 @@ static void aw87329_assert_reset(void *data)
+ 	gpiod_set_value_cansleep(aw->reset_gpio, 1);
+ }
+ 
+-static int aw87329_read_chip_id(struct device *dev, struct aw87329 *aw)
++static int aw87329_read_chip_id(struct aw87329 *aw)
+ {
+ 	unsigned int chip_id = 0;
+ 	int ret = 0;
+ 	int i;
+ 
+-	for (i = 0; i < AW87329_ID_RETRIES; i++) {
++	for (i = 0; i < AW87329_IO_RETRIES; i++) {
+ 		ret = regmap_read(aw->regmap, AW87329_REG_CHIP_ID, &chip_id);
+ 		if (!ret && chip_id == AW87329_CHIP_ID)
+ 			return 0;
+ 
+-		usleep_range(2000, 2500);
++		usleep_range(AW87329_RETRY_US_MIN, AW87329_RETRY_US_MAX);
+ 	}
+ 
+ 	if (ret)
+-		return dev_err_probe(dev, ret, "failed to read chip ID\n");
++		return dev_err_probe(aw->dev, ret, "failed to read chip ID\n");
+ 
+-	dev_err(dev, "unexpected chip ID 0x%02x\n", chip_id);
++	dev_err(aw->dev, "unexpected chip ID 0x%02x\n", chip_id);
+ 	return -ENODEV;
+ }
+ 
++static int aw87329_write_reg(struct aw87329 *aw, unsigned int reg,
++			     unsigned int value)
++{
++	int ret = 0;
++	int i;
++
++	for (i = 0; i < AW87329_IO_RETRIES; i++) {
++		ret = regmap_write(aw->regmap, reg, value);
++		if (!ret)
++			return 0;
++
++		usleep_range(AW87329_RETRY_US_MIN, AW87329_RETRY_US_MAX);
++	}
++
++	return ret;
++}
++
++static int aw87329_load_speaker_profile(struct aw87329 *aw)
++{
++	const struct firmware *fw;
++	int ret;
++
++	if (aw->profile_loaded)
++		return 0;
++
++	ret = request_firmware(&fw, aw->firmware_name, aw->dev);
++	if (ret)
++		return dev_err_probe(aw->dev, ret,
++				     "failed to load speaker profile %s\n",
++				     aw->firmware_name);
++
++	if (fw->size != AW87329_PROFILE_SIZE ||
++	    fw->data[AW87329_REG_CHIP_ID] != AW87329_CHIP_ID) {
++		dev_err(aw->dev,
++			"invalid speaker profile %s: size %zu, ID 0x%02x\n",
++			aw->firmware_name, fw->size,
++			fw->size ? fw->data[AW87329_REG_CHIP_ID] : 0);
++		ret = -EINVAL;
++		goto out_release;
++	}
++
++	memcpy(aw->speaker_profile, fw->data, AW87329_PROFILE_SIZE);
++	aw->profile_loaded = true;
++	dev_info(aw->dev, "loaded validated speaker profile %s\n",
++		 aw->firmware_name);
++	ret = 0;
++
++out_release:
++	release_firmware(fw);
++	return ret;
++}
++
++static void aw87329_disable_locked(struct aw87329 *aw)
++{
++	int ret;
++
++	if (aw->enabled) {
++		ret = aw87329_write_reg(aw, AW87329_REG_SYSCTRL,
++					AW87329_CHIP_DISABLE);
++		if (ret)
++			dev_warn(aw->dev,
++				 "failed to disable amplifier over I2C: %d\n", ret);
++	}
++
++	aw87329_assert_reset(aw);
++	usleep_range(AW87329_RETRY_US_MIN, AW87329_RETRY_US_MAX);
++	aw->enabled = false;
++}
++
++static int aw87329_enable_locked(struct aw87329 *aw)
++{
++	int ret;
++	int reg;
++
++	if (aw->enabled)
++		return 0;
++
++	ret = aw87329_load_speaker_profile(aw);
++	if (ret)
++		goto err_reset;
++
++	/* Match the downstream reset timing before every profile load. */
++	aw87329_assert_reset(aw);
++	usleep_range(AW87329_RETRY_US_MIN, AW87329_RETRY_US_MAX);
++	gpiod_set_value_cansleep(aw->reset_gpio, 0);
++	usleep_range(AW87329_RETRY_US_MIN, AW87329_RETRY_US_MAX);
++
++	ret = aw87329_read_chip_id(aw);
++	if (ret)
++		goto err_reset;
++
++	reg = AW87329_REG_SYSCTRL;
++	ret = aw87329_write_reg(aw, AW87329_REG_SYSCTRL,
++				aw->speaker_profile[AW87329_REG_SYSCTRL] &
++				AW87329_SYSCTRL_PROGRAM_MASK);
++	if (ret)
++		goto err_write;
++
++	for (reg = AW87329_REG_SYSCTRL + 1; reg <= AW87329_MAX_REGISTER; reg++) {
++		ret = aw87329_write_reg(aw, reg, aw->speaker_profile[reg]);
++		if (ret)
++			goto err_write;
++	}
++
++	reg = AW87329_REG_SYSCTRL;
++	ret = aw87329_write_reg(aw, AW87329_REG_SYSCTRL,
++				aw->speaker_profile[AW87329_REG_SYSCTRL]);
++	if (ret)
++		goto err_write;
++
++	aw->enabled = true;
++	dev_dbg(aw->dev, "speaker profile enabled\n");
++	return 0;
++
++err_write:
++	dev_err(aw->dev, "failed to program register 0x%02x: %d\n", reg,
++		ret);
++err_reset:
++	aw87329_assert_reset(aw);
++	aw->enabled = false;
++	return ret;
++}
++
++static int aw87329_drv_event(struct snd_soc_dapm_widget *w,
++			     struct snd_kcontrol *kcontrol, int event)
++{
++	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
++	struct aw87329 *aw = snd_soc_component_get_drvdata(component);
++	int ret = 0;
++
++	mutex_lock(&aw->lock);
++
++	switch (event) {
++	case SND_SOC_DAPM_POST_PMU:
++		ret = aw87329_enable_locked(aw);
++		break;
++	case SND_SOC_DAPM_PRE_PMD:
++		aw87329_disable_locked(aw);
++		break;
++	default:
++		ret = -EINVAL;
++		break;
++	}
++
++	mutex_unlock(&aw->lock);
++	return ret;
++}
++
++static const struct snd_soc_dapm_widget aw87329_dapm_widgets[] = {
++	SND_SOC_DAPM_INPUT("IN"),
++	SND_SOC_DAPM_OUT_DRV_E("DRV", SND_SOC_NOPM, 0, 0, NULL, 0,
++			       aw87329_drv_event,
++			       SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
++	SND_SOC_DAPM_OUTPUT("OUT"),
++};
++
++static const struct snd_soc_dapm_route aw87329_dapm_routes[] = {
++	{ "DRV", NULL, "IN" },
++	{ "OUT", NULL, "DRV" },
++};
++
++static int aw87329_component_suspend(struct snd_soc_component *component)
++{
++	struct aw87329 *aw = snd_soc_component_get_drvdata(component);
++
++	mutex_lock(&aw->lock);
++	aw87329_disable_locked(aw);
++	mutex_unlock(&aw->lock);
++
++	return 0;
++}
++
++static const struct snd_soc_component_driver aw87329_component_driver = {
++	.suspend = aw87329_component_suspend,
++	.dapm_widgets = aw87329_dapm_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(aw87329_dapm_widgets),
++	.dapm_routes = aw87329_dapm_routes,
++	.num_dapm_routes = ARRAY_SIZE(aw87329_dapm_routes),
++};
++
+ static int aw87329_i2c_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+@@ -67,6 +265,9 @@ static int aw87329_i2c_probe(struct i2c_client *client)
+ 	if (!aw)
+ 		return -ENOMEM;
+ 
++	aw->dev = dev;
++	mutex_init(&aw->lock);
++
+ 	/* Take ownership with reset asserted before touching the I2C device. */
+ 	aw->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(aw->reset_gpio))
+@@ -82,6 +283,11 @@ static int aw87329_i2c_probe(struct i2c_client *client)
+ 		return dev_err_probe(dev, PTR_ERR(aw->regmap),
+ 				     "failed to allocate register map\n");
+ 
++	ret = device_property_read_string(dev, "firmware-name",
++					  &aw->firmware_name);
++	if (ret)
++		return dev_err_probe(dev, ret, "missing firmware-name\n");
++
+ 	i2c_set_clientdata(client, aw);
+ 
+ 	/* Match the downstream reset timing, then read only the immutable ID. */
+@@ -89,12 +295,19 @@ static int aw87329_i2c_probe(struct i2c_client *client)
+ 	gpiod_set_value_cansleep(aw->reset_gpio, 0);
+ 	usleep_range(2000, 2500);
+ 
+-	ret = aw87329_read_chip_id(dev, aw);
++	ret = aw87329_read_chip_id(aw);
+ 	aw87329_assert_reset(aw);
+ 	if (ret)
+ 		return ret;
+ 
+-	dev_info(dev, "AW87329 chip ID 0x%02x detected; amplifier left disabled\n",
++	ret = devm_snd_soc_register_component(dev, &aw87329_component_driver,
++					      NULL, 0);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to register ASoC component\n");
++
++	dev_info(dev,
++		 "AW87329 chip ID 0x%02x detected; amplifier left disabled\n",
+ 		 AW87329_CHIP_ID);
+ 
+ 	return 0;
+@@ -104,7 +317,9 @@ static void aw87329_i2c_shutdown(struct i2c_client *client)
+ {
+ 	struct aw87329 *aw = i2c_get_clientdata(client);
+ 
+-	aw87329_assert_reset(aw);
++	mutex_lock(&aw->lock);
++	aw87329_disable_locked(aw);
++	mutex_unlock(&aw->lock);
+ }
+ 
+ static const struct of_device_id aw87329_of_match[] = {
+@@ -130,6 +345,7 @@ static struct i2c_driver aw87329_i2c_driver = {
+ };
+ module_i2c_driver(aw87329_i2c_driver);
+ 
+-MODULE_DESCRIPTION("Probe-only Awinic AW87329 amplifier driver");
++MODULE_FIRMWARE("aw87329_kspk.bin");
++MODULE_DESCRIPTION("Awinic AW87329 analog-input amplifier driver");
+ MODULE_AUTHOR("Kostiantyn Andriiuk <konstantin@andriyuk.com>");
+ MODULE_LICENSE("GPL");

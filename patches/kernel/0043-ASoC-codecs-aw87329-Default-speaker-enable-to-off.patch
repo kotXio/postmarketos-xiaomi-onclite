@@ -1,0 +1,38 @@
+From 775efe2e94ad5a8e51beb87943972c72bc766795 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Fri, 11 Sep 2026 13:52:44 +0300
+Subject: [PATCH 43/43] ASoC: codecs: aw87329: Default speaker enable to off
+
+Card-level DAPM pin switches initialize connected, so the first card sync can reach the amplifier before UCM disables the speaker. Put a non-inverted virtual NOPM switch ahead of the driver widget. Virtual mixer paths initialize disconnected and now require an explicit userspace opt-in before firmware loading or hardware enable.
+---
+ sound/soc/codecs/aw87329.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/codecs/aw87329.c b/sound/soc/codecs/aw87329.c
+index f39dd9c7bb558..506324914fc05 100644
+--- a/sound/soc/codecs/aw87329.c
++++ b/sound/soc/codecs/aw87329.c
+@@ -223,8 +223,13 @@ static int aw87329_drv_event(struct snd_soc_dapm_widget *w,
+ 	return ret;
+ }
+ 
++static const struct snd_kcontrol_new aw87329_enable_control =
++	SOC_DAPM_SINGLE("Switch", SND_SOC_NOPM, 0, 1, 0);
++
+ static const struct snd_soc_dapm_widget aw87329_dapm_widgets[] = {
+ 	SND_SOC_DAPM_INPUT("IN"),
++	SND_SOC_DAPM_SWITCH("Enable", SND_SOC_NOPM, 0, 0,
++			    &aw87329_enable_control),
+ 	SND_SOC_DAPM_OUT_DRV_E("DRV", SND_SOC_NOPM, 0, 0, NULL, 0,
+ 			       aw87329_drv_event,
+ 			       SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+@@ -232,7 +237,8 @@ static const struct snd_soc_dapm_widget aw87329_dapm_widgets[] = {
+ };
+ 
+ static const struct snd_soc_dapm_route aw87329_dapm_routes[] = {
+-	{ "DRV", NULL, "IN" },
++	{ "Enable", "Switch", "IN" },
++	{ "DRV", NULL, "Enable" },
+ 	{ "OUT", NULL, "DRV" },
+ };
+ 
