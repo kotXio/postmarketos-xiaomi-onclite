@@ -2,31 +2,34 @@
 
 Compiled APKs are attached to GitHub Releases, not stored in Git. The latest
 set is
-[`v2026.09.09-battery`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.09-battery).
+[`v2026.09.11-sensors`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-sensors).
 
 | Package | Purpose |
 | --- | --- |
-| `linux-postmarketos-qcom-msm8953-7.0.9-r25.apk` | Cumulative USB OTG and PMI632 QGauge kernel. |
-| `postmarketos-base-ui-networkmanager-usb-tethering-51-r2.apk` | Avoid a delayed gadget rebind after the role changes to HOST. |
-| `postmarketos-onclite-usb-gadget-lifecycle-1-r0.apk` | Restore the existing NCM gadget after DEVICE returns. |
+| `linux-postmarketos-qcom-msm8953-7.0.9-r28.apk` | Cumulative USB OTG, QGauge and Qualcomm Sensor Manager kernel. |
+| `sns-reg-0.1_git20250706-r4.apk` | Sensor Registry server and generator. |
+| `sns-reg-systemd-0.1_git20250706-r4.apk` | Starts the registry service early enough for Sensor Manager discovery. |
 
-The two userspace packages are unchanged from the earlier
-[`v2026.09.07-usb-otg`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.07-usb-otg)
-release.
+The existing tethering `51-r2` and onclite gadget-lifecycle `1-r0` packages
+from
+[`v2026.09.09-battery`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.09-battery)
+remain required for complete USB DEVICE/HOST recovery and are not duplicated
+in this Release.
 
 ## Exact compatibility
 
 - Xiaomi Redmi 7 Global (`xiaomi,onclite`, `M1810F6LG`), `aarch64`;
 - postmarketOS `v26.06`, tested with Plasma Mobile;
 - Linux runtime ABI `7.0.9-msm8953`;
-- tested upgrade from kernel package
-  `linux-postmarketos-qcom-msm8953-7.0.9-r16`;
-- tethering package `51-r2` and onclite gadget-lifecycle package `1-r0`.
+- cumulative kernel r25 USB/QGauge release as the starting point;
+- `msm-firmware-loader-systemd`, tethering `51-r2` and onclite
+  gadget-lifecycle `1-r0` installed;
+- root and `/boot` on microSD.
 
-Root and `/boot` were on microSD during testing. The released APKs contain no
-installation UUIDs or phone-specific boot image. Other storage layouts and
-Redmi 7 variants have not been validated. The persistent upgrade was tested
-from r16; a direct r0-to-r25 installation was not physically tested.
+The Sensor Registry service reads `persist/sensors/sns.reg` from that phone's
+existing read-only firmware mount. Do not copy a registry from another phone.
+No registry, calibration value or generated configuration is supplied by this
+project.
 
 ## Install
 
@@ -41,55 +44,79 @@ tr '\0' '\n' < /sys/firmware/devicetree/base/compatible |
 uname -m
 uname -r
 apk info -v linux-postmarketos-qcom-msm8953 \
+  msm-firmware-loader-systemd \
   postmarketos-base-ui-networkmanager-usb-tethering \
-  postmarketos-onclite-usb-gadget-lifecycle
+  postmarketos-onclite-usb-gadget-lifecycle \
+  sns-reg sns-reg-systemd
 ```
 
-The tested target reports `xiaomi,onclite`, `aarch64`, `7.0.9-msm8953` and
-the package versions above. Simulate the complete set:
+Keep a working lk2nd or TWRP recovery path. Simulate the complete local
+transaction:
 
 ```sh
-sudo apk add --simulate --allow-untrusted \
-  ./linux-postmarketos-qcom-msm8953-7.0.9-r25.apk \
-  ./postmarketos-base-ui-networkmanager-usb-tethering-51-r2.apk \
-  ./postmarketos-onclite-usb-gadget-lifecycle-1-r0.apk
+sudo apk add --simulate --no-network --allow-untrusted \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r28.apk \
+  ./sns-reg-0.1_git20250706-r4.apk \
+  ./sns-reg-systemd-0.1_git20250706-r4.apk
 ```
 
-Continue only if the simulation shows the expected kernel replacement and no
-removal or unrelated package change. Repeat without `--simulate`, run `sync`,
-then reboot normally with a working recovery path available.
-
-After reboot, check the kernel, battery and USB DEVICE mode before trying OTG:
+Continue only if the simulation shows the expected kernel and Sensor Registry
+changes without removing or changing unrelated packages. Repeat without
+`--simulate`, enable the service, synchronize storage and reboot:
 
 ```sh
-apk info -v linux-postmarketos-qcom-msm8953
-uname -r
-cat /sys/class/power_supply/qg-battery/status
-cat /sys/class/power_supply/qg-battery/capacity
+sudo apk add --no-network --allow-untrusted \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r28.apk \
+  ./sns-reg-0.1_git20250706-r4.apk \
+  ./sns-reg-systemd-0.1_git20250706-r4.apk
+sudo systemctl daemon-reload
+sudo systemctl enable sns-reg.service
+sync
+sudo reboot
 ```
 
-Battery capacity is approximate. R25 observes charger state but does not
-configure charging policy. Test an empty OTG adapter before a low-power
-peripheral and do not use the phone as a supply above `500 mA`.
+After reboot, confirm the package versions, services and IIO devices:
+
+```sh
+apk info -v linux-postmarketos-qcom-msm8953 sns-reg sns-reg-systemd
+systemctl is-active sns-reg.service iio-sensor-proxy.service
+systemctl show -p NRestarts sns-reg.service iio-sensor-proxy.service
+
+for path in /sys/bus/iio/devices/iio:device*; do
+  printf '%s: ' "$path"
+  cat "$path/name"
+done
+```
+
+Expected sensor names are `qcom-smgr-accel`, `qcom-smgr-mag`,
+`qcom-smgr-prox-light` and `qcom-smgr-light`. In Plasma Mobile, set
+Auto-rotate to `Always`.
 
 ## Roll back
 
-Download the r16 kernel APK from
-[`v2026.09.07-usb-otg`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.07-usb-otg),
-verify its SHA-256, then simulate replacing r25:
+Use the r25 kernel APK from
+[`v2026.09.09-battery`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.09-battery).
+Verify its SHA-256, then simulate both parts of the rollback:
 
 ```sh
-sudo apk add --simulate --allow-untrusted \
-  ./linux-postmarketos-qcom-msm8953-7.0.9-r16.apk
+sudo apk add --simulate --no-network --allow-untrusted \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r25.apk
+sudo apk del --simulate sns-reg-systemd sns-reg
 ```
 
-Continue only if the kernel is the sole package change. Repeat without
-`--simulate`, run `sync` and reboot. The USB userspace packages remain
-compatible with r16 and do not need to be removed.
+If both simulations are limited to those packages, stop the service, restore
+r25, remove the Sensor Registry packages and reboot:
 
-The exact tested kernel aports are retained under
-[`linux-postmarketos-qcom-msm8953-r25/`](linux-postmarketos-qcom-msm8953-r25/)
-and
-[`linux-postmarketos-qcom-msm8953-r16/`](linux-postmarketos-qcom-msm8953-r16/).
-The userspace sources are introduced by the two patches under
-[`../patches/pmaports/`](../patches/pmaports/).
+```sh
+sudo systemctl disable --now sns-reg.service
+sudo apk add --no-network --allow-untrusted \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r25.apk
+sudo apk del sns-reg-systemd sns-reg
+sudo systemctl daemon-reload
+sync
+sudo reboot
+```
+
+The package sources used for this release are retained under
+[`linux-postmarketos-qcom-msm8953-r28/`](linux-postmarketos-qcom-msm8953-r28/)
+and [`sns-reg-r4/`](sns-reg-r4/).

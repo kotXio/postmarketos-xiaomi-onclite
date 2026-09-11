@@ -1,9 +1,9 @@
 # Sources and provenance
 
-The USB OTG integration and onclite-specific QGauge follow-ups are
-project-authored for `xiaomi,onclite`. The sources below were used as pinned
-build inputs or technical references; no downstream driver was copied
-wholesale.
+The USB OTG integration, onclite-specific QGauge follow-ups, Sensor Manager
+corrections and Sensor Registry additions are project-authored for
+`xiaomi,onclite`. Imported work retains its original authorship. The sources
+below were used as pinned build inputs or technical references.
 
 ## Pinned build inputs
 
@@ -11,17 +11,25 @@ wholesale.
   commit `5be94b504b80d032481b90d533ee350ee13850f2`.
 - Cumulative USB OTG and QGauge review-series result tree:
   `9e11793a7bc4ec6fbe0d267fa19f4fe4f78e8633`.
+- Cumulative USB OTG, QGauge and Sensor Manager result tree:
+  `4fbd4ef990345acae246dcfa6a54124ef4968ce8`.
+- Sensor Registry base:
+  [`msm8996-mainline/sns-reg`](https://gitlab.com/msm8996-mainline/sns-reg)
+  commit `4d238e5f0baba3fb77456fe2bffbf8e8f18a71a0`; six-patch result tree
+  `94a4036c47b1675c68e3086c8b0f5c928eb9dcd3`.
 - pmaports `v26.06` kernel-package base: commit
   [`2b7f90ea7c2ae4d42ae187dc0b528dc163767b04`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/2b7f90ea7c2ae4d42ae187dc0b528dc163767b04).
 - Userspace patch base: pmaports commit
   [`6aa48aa00aa3b745f26996b45aaf768532ae7b24`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/6aa48aa00aa3b745f26996b45aaf768532ae7b24);
   final review-series tree `81a222e41fad76df7557f9f895d1842f2f5f3d81`.
 
-The exact tested r25 and r16 kernel aports are retained under
+The r28, r25 and r16 release aports are retained under
+[`packages/linux-postmarketos-qcom-msm8953-r28/`](packages/linux-postmarketos-qcom-msm8953-r28/),
 [`packages/linux-postmarketos-qcom-msm8953-r25/`](packages/linux-postmarketos-qcom-msm8953-r25/)
 and
 [`packages/linux-postmarketos-qcom-msm8953-r16/`](packages/linux-postmarketos-qcom-msm8953-r16/).
-The cumulative review series produces the same r25 kernel source tree.
+The exact `sns-reg r4` aport is retained under
+[`packages/sns-reg-r4/`](packages/sns-reg-r4/).
 
 ## Kernel and hardware references
 
@@ -78,8 +86,47 @@ The cumulative review series produces the same r25 kernel source tree.
   [power-supply ABI](https://github.com/torvalds/linux/blob/master/Documentation/ABI/testing/sysfs-class-power)
   defines the exposed property units and current-sign convention.
 
+## Sensor references
+
+- Kernel patches `0029..0032` preserve Yassine Oudjana's QRTR bus and Qualcomm
+  Sensor Manager work from the public postmarketOS
+  [draft MR 4118](https://gitlab.com/postmarketOS/pmaports/-/merge_requests/4118).
+  The original QRTR commits are
+  [`febf87f1`](https://gitlab.com/msm8996-mainline/linux/-/commit/febf87f1)
+  and
+  [`195e4779`](https://gitlab.com/msm8996-mainline/linux/-/commit/195e4779);
+  the Sensor Manager commits are
+  [`cf7f780a`](https://gitlab.com/msm8996-mainline/linux/-/commit/cf7f780a)
+  and
+  [`92672b3e`](https://gitlab.com/msm8996-mainline/linux/-/commit/92672b3e6591ea506b49a454d2fcd01b0def34b5).
+  Patches `0033..0036` contain the onclite corrections and ambient-light work
+  by Kostiantyn Andriiuk.
+- The six-patch userspace series extends the public
+  [`sns-reg`](https://gitlab.com/msm8996-mainline/sns-reg) server with robust
+  parsing, MSM8953 registry maps and a root-only runtime service. All six
+  additions are authored by Kostiantyn Andriiuk.
+- Android's public
+  [CHRE SMGR mapping](https://android.googlesource.com/platform/system/chre/+/android-8.0.0_r2/platform/slpi/platform_sensor.cc)
+  informed sensor-type interpretation.
+- Linux documents the
+  [IIO buffer ABI](https://docs.kernel.org/iio/iio_devbuf.html) and
+  [IIO test tools](https://docs.kernel.org/iio/iio_tools.html).
+- The triggerless-buffer support used by postmarketOS
+  `iio-sensor-proxy 3.9-r2` is described in
+  [MR 368](https://gitlab.freedesktop.org/hadess/iio-sensor-proxy/-/merge_requests/368).
+
+The stock `persist/sensors/sns.reg` and the generated runtime registry remain
+on their own phone. No calibration value, handset identifier or proprietary
+sensor configuration is distributed here.
+
 ## Public verification identifiers
 
+- cumulative r28 kernel APK SHA-256:
+  `62c63eb1e77f2b8937195a1eaf998b23219eeb9e8b379df0ca3d2f0841309977`;
+- Sensor Registry r4 APK SHA-256:
+  `2bc2073fd422ac93505def32050eaa644c53df92ac799c58f68a5b58a3b8bd28`;
+- Sensor Registry systemd r4 APK SHA-256:
+  `24ba7416b3d9259145d9bc723e2c750b70f817d6e2d482906a2ea8fc5febff45`;
 - cumulative r25 kernel APK SHA-256:
   `93b1dca07fb01dc070d766ea94b054d4dd67b4f0bf1b3dd43f33cc509f6e3947`;
 - previous r16 kernel APK SHA-256:

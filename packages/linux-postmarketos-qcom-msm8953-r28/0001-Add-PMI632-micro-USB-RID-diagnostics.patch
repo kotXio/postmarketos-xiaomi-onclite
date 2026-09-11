@@ -1,0 +1,481 @@
+From c4e1ab0742798eec3e05af4fb1149fdc4780366a Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sat, 5 Sep 2026 11:55:08 +0300
+Subject: [PATCH] Add PMI632 micro-USB RID diagnostics
+
+---
+ .../bindings/usb/qcom,pmi632-micro-usb.yaml   |  70 +++++
+ .../boot/dts/qcom/sdm632-xiaomi-onclite.dts   |  24 ++
+ arch/arm64/configs/msm8953.config             |   1 +
+ drivers/usb/common/Kconfig                    |  12 +
+ drivers/usb/common/Makefile                   |   1 +
+ drivers/usb/common/qcom-pmi632-micro-usb.c    | 295 ++++++++++++++++++
+ 6 files changed, 403 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml
+ create mode 100644 drivers/usb/common/qcom-pmi632-micro-usb.c
+
+diff --git a/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml b/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml
+new file mode 100644
+index 000000000..ec801bf41
+--- /dev/null
++++ b/Documentation/devicetree/bindings/usb/qcom,pmi632-micro-usb.yaml
+@@ -0,0 +1,70 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/usb/qcom,pmi632-micro-usb.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm PMI632 micro-USB role detection
++
++maintainers:
++  - Bryan O'Donoghue <bryan.odonoghue@linaro.org>
++
++description:
++  The PMI632 Type-C peripheral can be configured by firmware for a micro-USB
++  connector. In that mode its RID status and interrupt report whether the ID
++  pin is grounded. This binding describes the micro-USB use of that block.
++
++properties:
++  compatible:
++    const: qcom,pmi632-micro-usb
++
++  reg:
++    maxItems: 1
++
++  interrupts:
++    maxItems: 1
++
++  interrupt-names:
++    items:
++      - const: or-rid-detect-change
++
++  connector:
++    type: object
++    $ref: /schemas/connector/usb-connector.yaml#
++    unevaluatedProperties: false
++
++  vdd-vbus-supply:
++    description: Regulator supplying 5 V to VBUS while acting as USB host.
++
++required:
++  - compatible
++  - reg
++  - interrupts
++  - interrupt-names
++  - connector
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/interrupt-controller/irq.h>
++
++    pmic {
++        #address-cells = <1>;
++        #size-cells = <0>;
++
++        usb-role-detector@1500 {
++            compatible = "qcom,pmi632-micro-usb";
++            reg = <0x1500>;
++
++            interrupts = <0x2 0x15 0x0 IRQ_TYPE_EDGE_BOTH>;
++            interrupt-names = "or-rid-detect-change";
++
++            connector {
++                compatible = "usb-b-connector";
++                label = "micro-USB";
++                type = "micro";
++            };
++        };
++    };
++...
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+index 5f46bd1cc..d165f1b0c 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite.dts
+@@ -321,6 +321,26 @@ pm8953_l23: l23 {
+ 	};
+ };
+ 
++&pmi632_typec {
++	compatible = "qcom,pmi632-micro-usb";
++	interrupts = <0x2 0x15 0x0 IRQ_TYPE_EDGE_BOTH>;
++	interrupt-names = "or-rid-detect-change";
++	/delete-property/ vdd-vbus-supply;
++	status = "okay";
++
++	connector {
++		compatible = "usb-b-connector";
++		label = "micro-USB";
++		type = "micro";
++
++		port {
++			pmi632_hs_in: endpoint {
++				remote-endpoint = <&usb_dwc3_hs>;
++			};
++		};
++	};
++};
++
+ &sdhc_1 {
+ 	vmmc-supply = <&pm8953_l8>;
+ 	vqmmc-supply = <&pm8953_l5>;
+@@ -353,6 +373,10 @@ &usb3 {
+ 	status = "okay";
+ };
+ 
++&usb_dwc3_hs {
++	remote-endpoint = <&pmi632_hs_in>;
++};
++
+ &wcd_codec {
+ 	qcom,gnd-jack-type-normally-open;
+ 	qcom,hphl-jack-type-normally-open;
+diff --git a/arch/arm64/configs/msm8953.config b/arch/arm64/configs/msm8953.config
+index 0051dbaa5..768313cfd 100644
+--- a/arch/arm64/configs/msm8953.config
++++ b/arch/arm64/configs/msm8953.config
+@@ -28,6 +28,7 @@ CONFIG_QCOM_COINCELL=y
+ CONFIG_QCOM_CPR4PD=y
+ CONFIG_QCOM_WCNSS_CTRL=m
+ CONFIG_QCOM_WCNSS_PIL=m
++CONFIG_USB_QCOM_PMI632_MICRO_USB=y
+ # CONFIG_RTC_HCTOSYS is not set
+ # CONFIG_RTC_SYSTOHC is not set
+ CONFIG_SCHED_CLUSTER=y
+diff --git a/drivers/usb/common/Kconfig b/drivers/usb/common/Kconfig
+index b85662243..7dffafda3 100644
+--- a/drivers/usb/common/Kconfig
++++ b/drivers/usb/common/Kconfig
+@@ -49,3 +49,15 @@ config USB_CONN_GPIO
+ 
+ 	  To compile the driver as a module, choose M here: the module will
+ 	  be called usb-conn-gpio.ko
++
++config USB_QCOM_PMI632_MICRO_USB
++	bool "Qualcomm PMI632 micro-USB role detection"
++	depends on ARCH_QCOM && OF && MFD_SPMI_PMIC
++	help
++	  Enable micro-USB ID/RID detection using the USB Type-C peripheral
++	  found in the Qualcomm PMI632 PMIC. The first implementation is a
++	  diagnostic slice: it enables only the RID change interrupt and logs
++	  the debounced raw state without changing USB role or VBUS power.
++
++	  This should be enabled only on boards whose firmware has configured
++	  the PMI632 peripheral for micro-USB operation.
+diff --git a/drivers/usb/common/Makefile b/drivers/usb/common/Makefile
+index 8ac4d21ef..a8ee28d9e 100644
+--- a/drivers/usb/common/Makefile
++++ b/drivers/usb/common/Makefile
+@@ -9,5 +9,6 @@ usb-common-$(CONFIG_TRACING)	  += debug.o
+ usb-common-$(CONFIG_USB_LED_TRIG) += led.o
+ 
+ obj-$(CONFIG_USB_CONN_GPIO)	+= usb-conn-gpio.o
++obj-$(CONFIG_USB_QCOM_PMI632_MICRO_USB) += qcom-pmi632-micro-usb.o
+ obj-$(CONFIG_USB_OTG_FSM) += usb-otg-fsm.o
+ obj-$(CONFIG_USB_ULPI_BUS)	+= ulpi.o
+diff --git a/drivers/usb/common/qcom-pmi632-micro-usb.c b/drivers/usb/common/qcom-pmi632-micro-usb.c
+new file mode 100644
+index 000000000..eb5686991
+--- /dev/null
++++ b/drivers/usb/common/qcom-pmi632-micro-usb.c
+@@ -0,0 +1,295 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Qualcomm PMI632 micro-USB RID detector
++ *
++ * Diagnostic v1 intentionally reports RID changes without changing the USB
++ * role or controlling VBUS.
++ */
++
++#include <linux/atomic.h>
++#include <linux/bitops.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++#include <linux/workqueue.h>
++
++#define PMI632_TYPEC_MISC_STATUS		0x0b
++#define PMI632_TYPEC_U_USB_STATUS		0x0f
++#define PMI632_TYPEC_INTERRUPT_EN_CFG_2		0x60
++#define PMI632_TYPEC_U_USB_CFG			0x70
++#define PMI632_TYPEC_PMI632_U_USB_CFG		0x73
++
++#define PMI632_TYPEC_VBUS_DETECT		BIT(5)
++#define PMI632_U_USB_GROUND_NOVBUS		BIT(6)
++#define PMI632_MICRO_USB_STATE_CHANGE_INT_EN	BIT(5)
++#define PMI632_EN_MICRO_USB_MODE		BIT(0)
++#define PMI632_MICRO_USB_MODE_ONLY		BIT(0)
++
++#define PMI632_RID_DEBOUNCE_MS			50
++#define PMI632_RID_LOG_PREFIX			"[pmi632-rid-v1] "
++
++struct pmi632_rid_state {
++	unsigned int misc;
++	unsigned int u_usb;
++	unsigned int irq_enable_2;
++	unsigned int u_usb_cfg;
++	unsigned int pmi632_u_usb_cfg;
++};
++
++struct pmi632_micro_usb {
++	struct device *dev;
++	struct regmap *regmap;
++	struct delayed_work rid_work;
++	atomic_t irq_count;
++	u32 base;
++	int rid_irq;
++	unsigned int saved_irq_enable_2;
++	bool irq_disabled;
++	bool irq_gate_touched;
++	bool irq_gate_restored;
++};
++
++static int pmi632_rid_read_reg(struct pmi632_micro_usb *usb,
++			       unsigned int offset, unsigned int *value)
++{
++	int ret;
++
++	ret = regmap_read(usb->regmap, usb->base + offset, value);
++	if (ret)
++		dev_err(usb->dev,
++			PMI632_RID_LOG_PREFIX "failed to read %#06x: %pe\n",
++			usb->base + offset, ERR_PTR(ret));
++
++	return ret;
++}
++
++static int pmi632_rid_read_state(struct pmi632_micro_usb *usb,
++				 struct pmi632_rid_state *state)
++{
++	int ret;
++
++	ret = pmi632_rid_read_reg(usb, PMI632_TYPEC_MISC_STATUS,
++				  &state->misc);
++	if (ret)
++		return ret;
++
++	ret = pmi632_rid_read_reg(usb, PMI632_TYPEC_U_USB_STATUS,
++				  &state->u_usb);
++	if (ret)
++		return ret;
++
++	ret = pmi632_rid_read_reg(usb, PMI632_TYPEC_INTERRUPT_EN_CFG_2,
++				  &state->irq_enable_2);
++	if (ret)
++		return ret;
++
++	ret = pmi632_rid_read_reg(usb, PMI632_TYPEC_U_USB_CFG,
++				  &state->u_usb_cfg);
++	if (ret)
++		return ret;
++
++	return pmi632_rid_read_reg(usb, PMI632_TYPEC_PMI632_U_USB_CFG,
++				    &state->pmi632_u_usb_cfg);
++}
++
++static void pmi632_rid_report_state(struct pmi632_micro_usb *usb,
++				    const struct pmi632_rid_state *state,
++				    const char *reason)
++{
++	dev_info(usb->dev,
++		 PMI632_RID_LOG_PREFIX
++		 "%s irq_count=%d rid_grounded=%u vbus_present=%u\n",
++		 reason, atomic_read(&usb->irq_count),
++		 !!(state->u_usb & PMI632_U_USB_GROUND_NOVBUS),
++		 !!(state->misc & PMI632_TYPEC_VBUS_DETECT));
++	dev_info(usb->dev,
++		 PMI632_RID_LOG_PREFIX
++		 "registers: 150b=%#04x 150f=%#04x 1560=%#04x 1570=%#04x 1573=%#04x\n",
++		 state->misc, state->u_usb, state->irq_enable_2,
++		 state->u_usb_cfg, state->pmi632_u_usb_cfg);
++}
++
++static void pmi632_rid_work(struct work_struct *work)
++{
++	struct pmi632_micro_usb *usb =
++		container_of(to_delayed_work(work), struct pmi632_micro_usb,
++			     rid_work);
++	struct pmi632_rid_state state;
++
++	if (!pmi632_rid_read_state(usb, &state))
++		pmi632_rid_report_state(usb, &state, "debounced-irq");
++}
++
++static irqreturn_t pmi632_rid_irq(int irq, void *data)
++{
++	struct pmi632_micro_usb *usb = data;
++
++	atomic_inc(&usb->irq_count);
++	mod_delayed_work(system_power_efficient_wq, &usb->rid_work,
++			 msecs_to_jiffies(PMI632_RID_DEBOUNCE_MS));
++
++	return IRQ_HANDLED;
++}
++
++static void pmi632_rid_restore_irq_gate(struct pmi632_micro_usb *usb)
++{
++	unsigned int value;
++	int ret;
++
++	if (!usb->irq_gate_touched || usb->irq_gate_restored)
++		return;
++
++	value = usb->saved_irq_enable_2 &
++		PMI632_MICRO_USB_STATE_CHANGE_INT_EN;
++	ret = regmap_update_bits(usb->regmap,
++				 usb->base + PMI632_TYPEC_INTERRUPT_EN_CFG_2,
++				 PMI632_MICRO_USB_STATE_CHANGE_INT_EN, value);
++	if (ret)
++		dev_err(usb->dev,
++			PMI632_RID_LOG_PREFIX "failed to restore RID gate: %pe\n",
++			ERR_PTR(ret));
++	else
++		dev_info(usb->dev,
++			 PMI632_RID_LOG_PREFIX "restored RID gate to %u\n",
++			 !!value);
++
++	usb->irq_gate_restored = true;
++}
++
++static void pmi632_rid_quiesce(struct pmi632_micro_usb *usb)
++{
++	if (!usb->irq_disabled) {
++		disable_irq(usb->rid_irq);
++		usb->irq_disabled = true;
++	}
++
++	cancel_delayed_work_sync(&usb->rid_work);
++	pmi632_rid_restore_irq_gate(usb);
++}
++
++static int pmi632_micro_usb_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct pmi632_micro_usb *usb;
++	struct pmi632_rid_state state;
++	unsigned int trigger;
++	int ret;
++
++	usb = devm_kzalloc(dev, sizeof(*usb), GFP_KERNEL);
++	if (!usb)
++		return -ENOMEM;
++
++	usb->dev = dev;
++	usb->regmap = dev_get_regmap(dev->parent, NULL);
++	if (!usb->regmap)
++		return dev_err_probe(dev, -ENODEV,
++				     PMI632_RID_LOG_PREFIX
++				     "failed to get parent regmap\n");
++
++	ret = of_property_read_u32_index(dev->of_node, "reg", 0, &usb->base);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     PMI632_RID_LOG_PREFIX
++				     "failed to read register base\n");
++
++	usb->rid_irq = platform_get_irq_byname(pdev, "or-rid-detect-change");
++	if (usb->rid_irq < 0)
++		return dev_err_probe(dev, usb->rid_irq,
++				     PMI632_RID_LOG_PREFIX
++				     "failed to get RID IRQ\n");
++
++	trigger = irq_get_trigger_type(usb->rid_irq) & IRQ_TYPE_SENSE_MASK;
++	if (trigger != IRQ_TYPE_EDGE_BOTH)
++		return dev_err_probe(dev, -EINVAL,
++				     PMI632_RID_LOG_PREFIX
++				     "RID IRQ is not configured for both edges: %#x\n",
++				     trigger);
++
++	INIT_DELAYED_WORK(&usb->rid_work, pmi632_rid_work);
++	atomic_set(&usb->irq_count, 0);
++
++	ret = pmi632_rid_read_state(usb, &state);
++	if (ret)
++		return ret;
++
++	pmi632_rid_report_state(usb, &state, "probe-before-arm");
++
++	if (!(state.u_usb_cfg & PMI632_EN_MICRO_USB_MODE) &&
++	    !(state.pmi632_u_usb_cfg & PMI632_MICRO_USB_MODE_ONLY))
++		return dev_err_probe(dev, -ENODEV,
++				     PMI632_RID_LOG_PREFIX
++				     "firmware did not enable micro-USB mode\n");
++
++	usb->saved_irq_enable_2 = state.irq_enable_2;
++	ret = devm_request_threaded_irq(dev, usb->rid_irq, NULL,
++					pmi632_rid_irq, IRQF_ONESHOT,
++					"pmi632-micro-usb-rid", usb);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     PMI632_RID_LOG_PREFIX
++				     "failed to request RID IRQ\n");
++
++	ret = regmap_update_bits(usb->regmap,
++				 usb->base + PMI632_TYPEC_INTERRUPT_EN_CFG_2,
++				 PMI632_MICRO_USB_STATE_CHANGE_INT_EN,
++				 PMI632_MICRO_USB_STATE_CHANGE_INT_EN);
++	if (ret)
++		goto err_quiesce;
++	usb->irq_gate_touched = true;
++
++	ret = pmi632_rid_read_state(usb, &state);
++	if (ret)
++		goto err_quiesce;
++
++	if (!(state.irq_enable_2 & PMI632_MICRO_USB_STATE_CHANGE_INT_EN)) {
++		ret = -EIO;
++		dev_err(dev, PMI632_RID_LOG_PREFIX
++			"RID interrupt gate did not read back enabled\n");
++		goto err_quiesce;
++	}
++
++	platform_set_drvdata(pdev, usb);
++	pmi632_rid_report_state(usb, &state, "armed");
++	dev_info(dev, PMI632_RID_LOG_PREFIX
++		 "diagnostic armed; role and VBUS control are disabled\n");
++
++	return 0;
++
++err_quiesce:
++	pmi632_rid_quiesce(usb);
++	return dev_err_probe(dev, ret,
++			     PMI632_RID_LOG_PREFIX "failed to arm RID IRQ\n");
++}
++
++static void pmi632_micro_usb_remove(struct platform_device *pdev)
++{
++	pmi632_rid_quiesce(platform_get_drvdata(pdev));
++}
++
++static void pmi632_micro_usb_shutdown(struct platform_device *pdev)
++{
++	pmi632_rid_quiesce(platform_get_drvdata(pdev));
++}
++
++static const struct of_device_id pmi632_micro_usb_of_match[] = {
++	{ .compatible = "qcom,pmi632-micro-usb" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, pmi632_micro_usb_of_match);
++
++static struct platform_driver pmi632_micro_usb_driver = {
++	.probe = pmi632_micro_usb_probe,
++	.remove = pmi632_micro_usb_remove,
++	.shutdown = pmi632_micro_usb_shutdown,
++	.driver = {
++		.name = "qcom-pmi632-micro-usb",
++		.of_match_table = pmi632_micro_usb_of_match,
++	},
++};
++module_platform_driver(pmi632_micro_usb_driver);
++
++MODULE_DESCRIPTION("Qualcomm PMI632 micro-USB RID detector");
++MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

@@ -31,19 +31,19 @@ owner can reproduce the work safely.
   interface.
 - Battery voltage, current, temperature, status, health and approximate charge
   level in UPower and Plasma Mobile.
+- LIS2HH accelerometer, AK09918 magnetometer and stk3x3x proximity and ambient
+  light streams through Qualcomm Sensor Manager and Linux IIO.
+- Plasma Mobile automatic rotation through the standard SensorProxy service.
 
 ## Release
 
 The latest binary release is
-[`v2026.09.09-battery`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.09-battery).
-It contains cumulative kernel r25 with USB OTG and battery telemetry, plus the
-two USB userspace packages required for complete DEVICE/HOST recovery. It is
-for Xiaomi Redmi 7 (`onclite`), `aarch64`, postmarketOS `v26.06` and Linux
-`7.0.9-msm8953`.
+[`v2026.09.11-sensors`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-sensors).
+It contains cumulative kernel r28 and the `sns-reg r4` package pair. It is for
+Xiaomi Redmi 7 (`onclite`), `aarch64`, postmarketOS `v26.06` and Linux
+`7.0.9-msm8953`, starting from the previously released r25 USB/QGauge stack.
 
-Kernel r25 is installed on the test phone and boots normally from microSD.
-Battery reporting, USB networking, OTG and cable-free `s2idle`/resume were
-physically tested. Read the exact compatibility, installation and rollback in
+Read the exact compatibility, installation and rollback in
 [`packages/README.md`](packages/README.md) before using it.
 
 ## Known gaps
@@ -56,6 +56,11 @@ physically tested. Read the exact compatibility, installation and rollback in
   coulomb-counted.
 - Linux reports inherited PMI632 charging state but does not configure charger
   current, voltage or thermal policy.
+- The magnetometer exposes a working vector, but application-level compass
+  calibration has not been certified.
+- Proximity and ambient light are working sensor streams; call-screen blanking
+  and automatic-brightness policy are separate userspace work.
+- No gyroscope or Hall device is reported by this phone's Sensor Manager.
 
 ## Licensing
 

@@ -1,0 +1,309 @@
+From d7b29701679e706f1a252298232817a4faa63b39 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Thu, 10 Sep 2026 10:19:56 +0300
+Subject: [PATCH 4/6] Add MSM8953 sensor registry groups
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ SConstruct  |   7 +-
+ map.c       |  57 +++++++++++++++++
+ tests/map.c | 181 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 244 insertions(+), 1 deletion(-)
+ create mode 100644 tests/map.c
+
+diff --git a/SConstruct b/SConstruct
+index c28b514..e164bf2 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -37,6 +37,11 @@ env.Program(
+ 	target = "sns-reg-registry-test"
+ )
+ 
++env.Program(
++	source = ["tests/map.c", map],
++	target = "sns-reg-map-test"
++)
++
+ env.Default("sns-reg")
+ env.Alias("tools", ["sns-reg-validator", "sns-reg-generator"])
+-env.Alias("tests", ["sns-reg-registry-test"])
++env.Alias("tests", ["sns-reg-registry-test", "sns-reg-map-test"])
+diff --git a/map.c b/map.c
+index 2dfe34e..acab7a1 100644
+--- a/map.c
++++ b/map.c
+@@ -4,6 +4,38 @@
+ 
+ #include "map.h"
+ 
++#define U32_KEYS_8(base) \
++	{ (base) + 0, 4 }, { (base) + 1, 4 }, \
++	{ (base) + 2, 4 }, { (base) + 3, 4 }, \
++	{ (base) + 4, 4 }, { (base) + 5, 4 }, \
++	{ (base) + 6, 4 }, { (base) + 7, 4 },
++
++#define SSI_SMGR_DRIVER_KEYS(base, device_select, vdd, vddio) \
++	{ (base) + 0, 8 }, { (base) + 1, 8 }, \
++	{ (base) + 2, 4 }, { (base) + 3, 4 }, \
++	{ (base) + 4, 2 }, { (base) + 5, 2 }, \
++	{ (base) + 6, 2 }, { (base) + 7, 2 }, \
++	{ (base) + 8, 2 }, { (base) + 9, 1 }, \
++	{ (base) + 10, 1 }, { (base) + 11, 1 }, \
++	{ (base) + 12, 1 }, { (base) + 13, 1 }, \
++	{ (base) + 14, 1 }, { (base) + 15, 1 }, \
++	{ (device_select), 1 }, { (vdd), 1 }, { (vddio), 1 }, \
++	{ -1, 4 },
++
++#define SSI_SMGR_GROUP_KEYS(version_base, config_base, device_base, rail_base) \
++	{ (version_base) + 0, 1 }, { (version_base) + 1, 1 }, \
++	{ -1, 14 }, \
++	SSI_SMGR_DRIVER_KEYS((config_base) + 0, \
++		(device_base) + 0, (rail_base) + 0, (rail_base) + 1) \
++	SSI_SMGR_DRIVER_KEYS((config_base) + 16, \
++		(device_base) + 1, (rail_base) + 2, (rail_base) + 3) \
++	SSI_SMGR_DRIVER_KEYS((config_base) + 32, \
++		(device_base) + 2, (rail_base) + 4, (rail_base) + 5) \
++	SSI_SMGR_DRIVER_KEYS((config_base) + 48, \
++		(device_base) + 3, (rail_base) + 6, (rail_base) + 7) \
++	SSI_SMGR_DRIVER_KEYS((config_base) + 64, \
++		(device_base) + 4, (rail_base) + 8, (rail_base) + 9)
++
+ /*
+  * Group map
+  */
+@@ -95,6 +127,19 @@ const struct group groups[] = {
+ 			{ /* sentinel */ }
+ 		},
+ 	},
++	{ 1090,
++		{
++			U32_KEYS_8(4800)
++			U32_KEYS_8(4808)
++			U32_KEYS_8(4816)
++			U32_KEYS_8(4824)
++			U32_KEYS_8(4832)
++			U32_KEYS_8(4840)
++			U32_KEYS_8(4848)
++			U32_KEYS_8(4856)
++			{ /* sentinel */ }
++		},
++	},
+ 	{ 2000,
+ 		{
+ 			{ 200, 4 },
+@@ -274,6 +319,12 @@ const struct group groups[] = {
+ 			{ /* sentinel */ }
+ 		},
+ 	},
++	{ 2691,
++		{
++			SSI_SMGR_GROUP_KEYS(3600, 3602, 3682, 3687)
++			{ /* sentinel */ }
++		},
++	},
+ 	{ 2692,
+ 		{
+ 			{ 2000, 1 },
+@@ -1356,6 +1407,12 @@ const struct group groups[] = {
+ 			{ /* sentinel */ }
+ 		},
+ 	},
++	{ 3050,
++		{
++			SSI_SMGR_GROUP_KEYS(5500, 5502, 5582, 5587)
++			{ /* sentinel */ }
++		},
++	},
+ 	{ 3070,
+ 		{
+ 			{ 5700, 4 },
+diff --git a/tests/map.c b/tests/map.c
+new file mode 100644
+index 0000000..399fce2
+--- /dev/null
++++ b/tests/map.c
+@@ -0,0 +1,181 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "../map.h"
++
++#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
++#define SNS_REG_GROUP_DATA_MAX_LEN 0x100
++
++static const short onclite_observed_groups[] = {
++	0, 1000, 1020, 1040, 1090, 2690, 2691, 2800, 3050,
++	3300, 3301, 3302, 3303, 3304, 3305, 3306, 3307, 3308, 3309,
++	3310, 3311, 3312, 3313, 3314, 3315, 3316, 3317, 3318, 3319,
++	3320, 3321, 3322, 3323, 3324, 3325, 3326, 3327, 3328, 3329,
++};
++
++static const short msm8953_full_size_groups[] = { 1090, 2691, 3050 };
++
++static int check_sar_group(const struct group *group)
++{
++	size_t index;
++	int failures = 0;
++
++	for (index = 0; index < 64; index++) {
++		short expected_id = 4800 + index;
++		if (group->keys[index].id != expected_id ||
++		    group->keys[index].len != 4) {
++			fprintf(stderr, "SAR key %zu has id=%d length=%u\n", index,
++				group->keys[index].id, group->keys[index].len);
++			failures++;
++		}
++	}
++
++	if (group->keys[64].len) {
++		fprintf(stderr, "SAR group has no sentinel after 64 keys\n");
++		failures++;
++	}
++
++	return failures;
++}
++
++static int check_smgr_group(const struct group *group, short version_base,
++			    short config_base, short device_base,
++			    short rail_base)
++{
++	static const unsigned char driver_lengths[] = {
++		8, 8, 4, 4, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
++	};
++	size_t config;
++	size_t field;
++	int failures = 0;
++
++	if (group->keys[0].id != version_base || group->keys[0].len != 1 ||
++	    group->keys[1].id != version_base + 1 || group->keys[1].len != 1 ||
++	    group->keys[2].id != -1 || group->keys[2].len != 14) {
++		fprintf(stderr, "SMGR group %d has an invalid 16-byte header\n",
++			group->id);
++		failures++;
++	}
++
++	for (config = 0; config < 5; config++) {
++		size_t offset = 3 + config * 20;
++		short expected_device = device_base + config;
++		short expected_vdd = rail_base + config * 2;
++		short expected_vddio = expected_vdd + 1;
++
++		for (field = 0; field < ARRAY_SIZE(driver_lengths); field++) {
++			short expected_id = config_base + config * 16 + field;
++
++			if (group->keys[offset + field].id != expected_id ||
++			    group->keys[offset + field].len != driver_lengths[field]) {
++				fprintf(stderr,
++					"SMGR group %d config %zu field %zu has id=%d length=%u\n",
++					group->id, config, field,
++					group->keys[offset + field].id,
++					group->keys[offset + field].len);
++				failures++;
++			}
++		}
++
++		if (group->keys[offset + 16].id != expected_device ||
++		    group->keys[offset + 16].len != 1 ||
++		    group->keys[offset + 17].id != expected_vdd ||
++		    group->keys[offset + 17].len != 1 ||
++		    group->keys[offset + 18].id != expected_vddio ||
++		    group->keys[offset + 18].len != 1 ||
++		    group->keys[offset + 19].id != -1 ||
++		    group->keys[offset + 19].len != 4) {
++			fprintf(stderr,
++				"SMGR group %d config %zu has invalid selector/rail/padding keys\n",
++				group->id, config);
++			failures++;
++		}
++	}
++
++	if (group->keys[103].len) {
++		fprintf(stderr, "SMGR group %d has no sentinel after five configs\n",
++			group->id);
++		failures++;
++	}
++
++	return failures;
++}
++
++static size_t group_size(const struct group *group)
++{
++	size_t index = 0;
++	size_t size = 0;
++
++	while (group->keys[index].len) {
++		size += group->keys[index].len;
++		index++;
++	}
++
++	return size;
++}
++
++int main(void)
++{
++	size_t index;
++	int failures = 0;
++
++	for (index = 0; index < ARRAY_SIZE(onclite_observed_groups); index++) {
++		short id = onclite_observed_groups[index];
++		const struct group *group = group_by_id(id);
++		size_t size;
++
++		if (!group) {
++			fprintf(stderr, "missing observed group %d\n", id);
++			failures++;
++			continue;
++		}
++
++		size = group_size(group);
++		if (size > SNS_REG_GROUP_DATA_MAX_LEN) {
++			fprintf(stderr, "group %d is too large: %zu\n", id, size);
++			failures++;
++		}
++	}
++
++	for (index = 0; index < ARRAY_SIZE(msm8953_full_size_groups); index++) {
++		short id = msm8953_full_size_groups[index];
++		const struct group *group = group_by_id(id);
++		size_t size;
++
++		if (!group)
++			continue;
++
++		size = group_size(group);
++		if (size != SNS_REG_GROUP_DATA_MAX_LEN) {
++			fprintf(stderr, "group %d has size %zu, expected %d\n",
++				id, size, SNS_REG_GROUP_DATA_MAX_LEN);
++			failures++;
++		}
++	}
++
++	{
++		const struct group *sar = group_by_id(1090);
++		if (sar)
++			failures += check_sar_group(sar);
++	}
++
++	{
++		const struct group *smgr = group_by_id(2691);
++		if (smgr)
++			failures += check_smgr_group(smgr, 3600, 3602, 3682, 3687);
++	}
++
++	{
++		const struct group *smgr = group_by_id(3050);
++		if (smgr)
++			failures += check_smgr_group(smgr, 5500, 5502, 5582, 5587);
++	}
++
++	if (failures)
++		return EXIT_FAILURE;
++
++	puts("all onclite-observed groups are mapped with valid sizes");
++	return EXIT_SUCCESS;
++}
+-- 
+2.43.0
+

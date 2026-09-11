@@ -1,0 +1,48 @@
+From c71d87d7d68e04c84c830d107210d75375207682 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Thu, 10 Sep 2026 10:19:56 +0300
+Subject: [PATCH 5/6] Make sensor registry group logging explicit
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ main.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/main.c b/main.c
+index 5f7b9d0..340e9a4 100644
+--- a/main.c
++++ b/main.c
+@@ -84,7 +84,8 @@ int handle_group_request(int sock, struct qrtr_packet *packet, uint64_t *registr
+ 
+ 	group = group_by_id(request.id);
+ 
+-	printf("Requested group %04d%s\n", request.id, !group ? " unmapped!" : "");
++	printf("Requested group %04d map=%s\n", request.id,
++		group ? "mapped" : "unmapped");
+ 
+ 	response.id = request.id;
+ 
+@@ -117,13 +118,18 @@ int handle_group_request(int sock, struct qrtr_packet *packet, uint64_t *registr
+ 		sns_reg_group_resp_ei
+ 	);
+ 	if (ret < 0) {
+-		fprintf(stderr, "Failed to encode response: %d\n", ret);
++		fprintf(stderr, "Group %04d encode failed: %d\n", request.id, ret);
+ 		goto out;
+ 	}
+ 
+ 	ret = qrtr_sendto(sock, packet->node, packet->port, out_packet.data, out_packet.data_len);
+ 	if (ret)
+-		fprintf(stderr, "Failed to send response: %d\n", ret);
++		fprintf(stderr, "Group %04d send failed: %d\n", request.id, ret);
++	else
++		printf("Responded group %04d result=%s length=%hu\n", request.id,
++			group ? "success" : "failure", response.data_len);
++
++	fflush(stdout);
+ 
+ out:
+ 	free(out_packet.data);
+-- 
+2.43.0
+

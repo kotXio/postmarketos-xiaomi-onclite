@@ -1,0 +1,85 @@
+From f7093f0442c9b16116657fdb4d492b177ad05972 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 8 Sep 2026 12:51:34 +0300
+Subject: [PATCH] power: supply: qcom_qg: use configured FIFO IRQ length
+
+The FIFO count status is zero when the full-FIFO interrupt arrives.
+Follow Qualcomm's downstream driver and read the configured S2 FIFO
+length in the FIFO-done path. Keep the live count for pending drains.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/power/supply/qcom_qg.c | 26 ++++++++++++++++++--------
+ 1 file changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_qg.c b/drivers/power/supply/qcom_qg.c
+index 0707c14da..1e45a1250 100644
+--- a/drivers/power/supply/qcom_qg.c
++++ b/drivers/power/supply/qcom_qg.c
+@@ -235,14 +235,16 @@ static int qg_read_temperature(struct qcom_qg *qg, int *temp_decidegc)
+ /**
+  * qg_read_fifo() - Read voltage and current samples from the hardware FIFO.
+  * @qg: QGauge instance
++ * @configured_length: use configured full-FIFO length instead of live count
+  * @fifo_count_out: number of FIFO entries reported by the hardware
+  * @valid_out: number of complete voltage/current pairs consumed
+  *
+- * Asserts master hold, reads available FIFO entries, averages them,
+- * and stores the results. Releasing master hold restarts FIFO collection.
++ * Asserts master hold, reads either the configured full-FIFO length or the
++ * currently available entries, averages them, and stores the results.
++ * Releasing master hold restarts FIFO collection.
+  */
+-static int qg_read_fifo(struct qcom_qg *qg, unsigned int *fifo_count_out,
+-			unsigned int *valid_out)
++static int qg_read_fifo(struct qcom_qg *qg, bool configured_length,
++			unsigned int *fifo_count_out, unsigned int *valid_out)
+ {
+ 	unsigned int count_reg;
+ 	unsigned int fifo_count;
+@@ -266,11 +268,17 @@ static int qg_read_fifo(struct qcom_qg *qg, unsigned int *fifo_count_out,
+ 		return ret;
+ 	}
+ 
+-	ret = regmap_read(qg->regmap, qg->base + QG_STATUS3, &count_reg);
++	ret = regmap_read(qg->regmap,
++			  qg->base + (configured_length ?
++			  QG_S2_NORMAL_MEAS_CTL2 : QG_STATUS3), &count_reg);
+ 	if (ret)
+ 		goto release;
+ 
+-	fifo_count = count_reg & QG_STATUS3_FIFO_RT_COUNT;
++	if (configured_length)
++		fifo_count = ((count_reg & QG_S2_FIFO_LENGTH_MASK) >>
++			      QG_S2_FIFO_LENGTH_SHIFT) + 1;
++	else
++		fifo_count = count_reg & QG_STATUS3_FIFO_RT_COUNT;
+ 	if (fifo_count > QG_MAX_FIFO_LENGTH)
+ 		fifo_count = QG_MAX_FIFO_LENGTH;
+ 	*fifo_count_out = fifo_count;
+@@ -375,7 +383,7 @@ static int qg_process_pending_fifo(struct qcom_qg *qg)
+ 	if (!fifo_count)
+ 		return 0;
+ 
+-	ret = qg_read_fifo(qg, &processed_count, &valid);
++	ret = qg_read_fifo(qg, false, &processed_count, &valid);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -480,10 +488,12 @@ static irqreturn_t qg_fifo_done_irq(int irq, void *data)
+ 	}
+ 
+ 	dev_alert(qg->dev, "[QG-V5] FIFO IRQ consume begin\n");
+-	ret = qg_read_fifo(qg, &processed_count, &valid);
++	ret = qg_read_fifo(qg, true, &processed_count, &valid);
+ 	dev_alert(qg->dev,
+ 		  "[QG-V5] FIFO IRQ consume end ret=%d count=%u valid=%u\n",
+ 		  ret, processed_count, valid);
++	dev_info(qg->dev, "[QG-V6] FIFO IRQ configured count=%u valid=%u\n",
++		 processed_count, valid);
+ 	if (ret)
+ 		dev_warn(qg->dev, "Failed to read FIFO: %d\n", ret);
+ 	else if (log_first)
+-- 
+2.43.0
+

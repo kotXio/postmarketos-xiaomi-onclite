@@ -2,37 +2,47 @@
 
 The public source is split by upstream target:
 
-- [`kernel/`](kernel/): cumulative 28-patch review series for the MSM8953
-  kernel;
-- [`pmaports/`](pmaports/): two userspace package changes for gadget lifecycle
-  and the NetworkManager role race.
+- [`kernel/`](kernel/): cumulative 36-patch series for the MSM8953 kernel;
+- [`sns-reg/`](sns-reg/): six Sensor Registry patches;
+- [`pmaports/`](pmaports/): the existing USB gadget lifecycle and
+  NetworkManager role-race fixes.
 
-Apply the kernel series with `git am` in lexical order to kernel commit
-`5be94b504b80d032481b90d533ee350ee13850f2`. Patches `0001..0012` implement
-USB OTG; patches `0013..0028` add QGauge battery telemetry. The result must
-have tree `9e11793a7bc4ec6fbe0d267fa19f4fe4f78e8633`.
+## Kernel series
 
-The USB series and the project-authored QGauge follow-ups use
-`Kostiantyn Andriiuk <konstantin@andriyuk.com>`. QGauge patches `0013..0018`
-retain Marc Lainez's original authorship from the public development series.
+Apply the kernel patches with `git am` in lexical order to
+`msm8953-mainline/linux` commit
+`5be94b504b80d032481b90d533ee350ee13850f2`:
 
-Apply the pmaports series with `git am` in lexical order to commit
-`6aa48aa00aa3b745f26996b45aaf768532ae7b24`. The result must have tree
-`81a222e41fad76df7557f9f895d1842f2f5f3d81`.
+- `0001..0012`: USB OTG;
+- `0013..0028`: QGauge battery telemetry;
+- `0029..0032`: QRTR bus and Qualcomm Sensor Manager;
+- `0033..0036`: onclite Sensor Manager corrections and ambient light.
 
-Exact package inputs are retained separately under
-[`../packages/linux-postmarketos-qcom-msm8953-r25/`](../packages/linux-postmarketos-qcom-msm8953-r25/)
-and
-[`../packages/linux-postmarketos-qcom-msm8953-r16/`](../packages/linux-postmarketos-qcom-msm8953-r16/).
-Do not apply the review series again on top of either aport.
+The result must have tree
+`4fbd4ef990345acae246dcfa6a54124ef4968ce8`.
 
-The deterministic userspace regression can be run after applying the pmaports
-series. Run it from the repository root:
+USB patches `0001..0012`, QGauge follow-ups `0019..0028` and sensor patches
+`0033..0036` are by Kostiantyn Andriiuk. QGauge patches `0013..0018` retain
+Marc Lainez's authorship, and Sensor Manager patches `0029..0032` retain
+Yassine Oudjana's authorship.
 
-```sh
-./tests/onclite-usb-gadget-lifecycle-phase3b-test.sh /path/to/pmaports
-```
+## Sensor Registry series
+
+Apply [`sns-reg/`](sns-reg/) with `git am` in lexical order to public
+`sns-reg` commit `4d238e5f0baba3fb77456fe2bffbf8e8f18a71a0`. The result must have tree
+`94a4036c47b1675c68e3086c8b0f5c928eb9dcd3`.
+
+All six additions are by
+`Kostiantyn Andriiuk <konstantin@andriyuk.com>`. They provide robust registry
+parsing, MSM8953 group maps, padding-key bounds protection and the root-only
+runtime service.
+
+## Package sources
+
+Package inputs used for the release are retained separately under
+[`../packages/linux-postmarketos-qcom-msm8953-r28/`](../packages/linux-postmarketos-qcom-msm8953-r28/)
+and [`../packages/sns-reg-r4/`](../packages/sns-reg-r4/). Their patch sets are
+already complete; do not apply the review series again on top of either aport.
 
 Published patch bytes are listed in [`SHA256SUMS`](SHA256SUMS). The series
-represents the physically tested configuration. It retains diagnostic QGauge
-logging and has not been submitted upstream.
+remains out of tree.

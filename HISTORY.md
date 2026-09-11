@@ -1,5 +1,17 @@
 # Project history
 
+## 2026-09-11 — Sensor Manager
+
+Added cumulative kernel r28 and the `sns-reg r4` package pair:
+
+- LIS2HH accelerometer and Plasma Mobile automatic rotation;
+- AK09918 magnetometer;
+- independent stk3x3x proximity and ambient-light streams;
+- runtime conversion of the phone's own stock Sensor Registry into a
+  root-only RAM file;
+- parser, bounds, QMI lifetime and buffering fixes required for stable sensor
+  operation.
+
 ## 2026-09-09 — Battery telemetry
 
 Added cumulative kernel r25 with the complete USB OTG implementation and
@@ -7,8 +19,7 @@ PMI632 QGauge battery reporting:
 
 - standard Linux voltage, current, temperature, health and charge-state data;
 - approximate OCV-based capacity in UPower and Plasma Mobile;
-- live current response across USB cable transitions;
-- persistent microSD boot and cable-free `s2idle`/resume validation.
+- live current response across USB cable transitions.
 
 The implementation observes inherited charger state but does not change
 charger current, voltage or thermal policy.
@@ -22,9 +33,6 @@ Completed the first reproducible onclite improvement:
 - bounded DWC3/xHCI teardown for empty adapters and a loaded RTL8152 hub;
 - userspace protection against a delayed USB-gadget rebind race;
 - automatic NCM restoration after returning to DEVICE mode.
-
-The three packages were physically tested. Kernel r16 was installed and booted
-successfully with USB networking active and no PMI632 fault events.
 
 ## 2026-09-05 — Public project
 

@@ -1,0 +1,37 @@
+From 45d61ad38c70fbd09a17f9375f0e6c4c71fc7f12 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Thu, 10 Sep 2026 11:40:36 +0300
+Subject: [PATCH] iio: qcom-smgr: Fix buffering item length storage
+
+---
+ drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.c | 3 +--
+ drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.h | 2 +-
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.c b/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.c
+index 1b58e266280d0..c5a5589e1c927 100644
+--- a/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.c
++++ b/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.c
+@@ -469,8 +469,7 @@ const struct qmi_elem_info sns_smgr_buffering_req_ei[] = {
+ 	{
+ 		.data_type = QMI_DATA_LEN,
+ 		.elem_len = 1,
+-		.elem_size =
+-			sizeof_field(struct sns_smgr_buffering_req, item_len),
++		.elem_size = sizeof(u8),
+ 		.array_type = NO_ARRAY,
+ 		.tlv_type = 0x04,
+ 		.offset = offsetof(struct sns_smgr_buffering_req, item_len),
+diff --git a/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.h b/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.h
+index 5d0d622b9381b..ac81fe6893d37 100644
+--- a/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.h
++++ b/drivers/iio/common/qcom_smgr/qmi/qmi_sns_smgr.h
+@@ -115,7 +115,7 @@ struct sns_smgr_buffering_req {
+ 	u8 report_id;
+ 	u8 action;
+ 	u32 report_rate;
+-	u8 item_len;
++	u32 item_len;
+ 	struct sns_smgr_buffering_req_item items[SNS_SMGR_DATA_TYPE_COUNT];
+ 	u8 notify_suspend_valid;
+ 	struct sns_smgr_buffering_req_notify_suspend notify_suspend;

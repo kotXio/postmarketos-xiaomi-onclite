@@ -1,0 +1,155 @@
+From a43c7a4ab2a96b0daf4bc193b049bf32ae99ea08 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Wed, 9 Sep 2026 19:06:19 +0300
+Subject: [PATCH 2/6] parser: Store registry values as uint64_t
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ main.c           | 11 ++++++-----
+ registry.c       |  7 +++++--
+ registry.h       |  3 ++-
+ tests/registry.c | 11 ++++++-----
+ 4 files changed, 19 insertions(+), 13 deletions(-)
+
+diff --git a/main.c b/main.c
+index af28b1c..5f7b9d0 100644
+--- a/main.c
++++ b/main.c
+@@ -12,6 +12,7 @@
+ #include <stdbool.h>
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <stdint.h>
+ #include <string.h>
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+@@ -32,14 +33,14 @@ struct qmi_header {
+ 	unsigned short msg_len;
+ } __attribute__((packed));
+ 
+-static unsigned long registry[KEY_MAX] = { };
++static uint64_t registry[KEY_MAX] = { };
+ 
+-unsigned long *parse_registry(int fd)
++uint64_t *parse_registry(int fd)
+ {
+ 	FILE *file = fdopen(fd, "r");
+ 	char line[LINE_SIZE];
+ 	unsigned short key;
+-	unsigned long value;
++	uint64_t value;
+ 
+ 	if (!file) {
+ 		fprintf(stderr, "Failed to open registry file: %s\n", strerror(errno));
+@@ -56,7 +57,7 @@ unsigned long *parse_registry(int fd)
+ 	return registry;
+ }
+ 
+-int handle_group_request(int sock, struct qrtr_packet *packet, unsigned long *registry)
++int handle_group_request(int sock, struct qrtr_packet *packet, uint64_t *registry)
+ {
+ 	unsigned int txn_id;
+ 	struct sns_reg_group_req request;
+@@ -134,7 +135,7 @@ int main(int argc, const char **argv)
+ {
+ 	int fd;
+ 	struct stat stat;
+-	unsigned long *registry;
++	uint64_t *registry;
+ 	int sock;
+ 	int pollfds;
+ 	struct sockaddr_qrtr sq;
+diff --git a/registry.c b/registry.c
+index dfedbe9..d970852 100644
+--- a/registry.c
++++ b/registry.c
+@@ -7,14 +7,16 @@
+ 
+ #include <errno.h>
+ #include <stdbool.h>
++#include <stdint.h>
+ #include <stdlib.h>
+ 
+ #include "map.h"
+ #include "registry.h"
+ 
+ bool parse_registry_line(const char *line, unsigned short *key,
+-			 unsigned long *value)
++			 uint64_t *value)
+ {
++	unsigned long long parsed_value;
+ 	unsigned long parsed_key;
+ 	char *end;
+ 
+@@ -28,11 +30,12 @@ bool parse_registry_line(const char *line, unsigned short *key,
+ 
+ 	line = end;
+ 	errno = 0;
+-	*value = strtoul(line, &end, 0);
++	parsed_value = strtoull(line, &end, 0);
+ 	if (end == line || errno == ERANGE)
+ 		return false;
+ 
+ 	*key = parsed_key;
++	*value = parsed_value;
+ 
+ 	return true;
+ }
+diff --git a/registry.h b/registry.h
+index ff2e3d9..f4a0ba0 100644
+--- a/registry.h
++++ b/registry.h
+@@ -3,6 +3,7 @@
+ #pragma once
+ 
+ #include <stdbool.h>
++#include <stdint.h>
+ 
+ bool parse_registry_line(const char *line, unsigned short *key,
+-			 unsigned long *value);
++			 uint64_t *value);
+diff --git a/tests/registry.c b/tests/registry.c
+index d3c053c..119d940 100644
+--- a/tests/registry.c
++++ b/tests/registry.c
+@@ -7,14 +7,15 @@
+ 
+ #include <assert.h>
+ #include <stdbool.h>
++#include <stdint.h>
+ #include <stdlib.h>
+ 
+ #include "../registry.h"
+ 
+ static void expect_value(const char *line, unsigned short expected_key,
+-			 unsigned long expected_value)
++			 uint64_t expected_value)
+ {
+-	unsigned long value = 0;
++	uint64_t value = 0;
+ 	unsigned short key = 0;
+ 	bool parsed;
+ 
+@@ -26,7 +27,7 @@ static void expect_value(const char *line, unsigned short expected_key,
+ 
+ static void expect_rejected(const char *line)
+ {
+-	unsigned long value = 0;
++	uint64_t value = 0;
+ 	unsigned short key = 0;
+ 
+ 	assert(!parse_registry_line(line, &key, &value));
+@@ -37,9 +38,9 @@ int main(void)
+ 	expect_value("2010 0x68 0x00010004 # i2c_address", 2010, 0x68);
+ 	expect_value("2009 4 0x00010004 # i2c_bus", 2009, 4);
+ 	expect_value("700 -2 0x00010004 # axis", 700,
+-		     (unsigned long)-2);
++		     UINT64_MAX - 1);
+ 	expect_value("2002 0x94482e378aa52acf 0x00010004 # UUID", 2002,
+-		     0x94482e378aa52acfUL);
++		     UINT64_C(0x94482e378aa52acf));
+ 
+ 	expect_rejected("# comment");
+ 	expect_rejected(":version 0x00010004");
+-- 
+2.43.0

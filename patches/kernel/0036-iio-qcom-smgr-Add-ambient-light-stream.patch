@@ -1,0 +1,424 @@
+From 77221b8967eacb5d54da9602a9a7bd6a5dc43ffa Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Thu, 10 Sep 2026 17:50:48 +0300
+Subject: [PATCH 36/36] iio: qcom-smgr: Add ambient light stream
+
+Expose the secondary PROX_LIGHT data type as a separate IIO intensity
+stream. Route buffering indications by collision-free report IDs so
+proximity and ambient light can run concurrently.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/iio/common/qcom_smgr/qcom_smgr.c | 200 +++++++++++++++++------
+ include/linux/iio/common/qcom_smgr.h     |  13 +-
+ 2 files changed, 157 insertions(+), 56 deletions(-)
+
+diff --git a/drivers/iio/common/qcom_smgr/qcom_smgr.c b/drivers/iio/common/qcom_smgr/qcom_smgr.c
+index 95c717486e1ca..9dd0a6f6e6fdf 100644
+--- a/drivers/iio/common/qcom_smgr/qcom_smgr.c
++++ b/drivers/iio/common/qcom_smgr/qcom_smgr.c
+@@ -159,18 +159,17 @@ static int qcom_smgr_request_single_sensor_info(struct qcom_smgr *smgr,
+ }
+ 
+ static int qcom_smgr_request_buffering(struct qcom_smgr *smgr,
+-				       struct qcom_smgr_sensor *sensor,
++				       struct qcom_smgr_stream *stream,
+ 				       bool enable)
+ {
+ 	struct sns_smgr_buffering_req req = {
+-		/*
+-		 * Reuse sensor ID as a report ID to avoid having to keep track
+-		 * of a separate set of IDs
+-		 */
+-		.report_id = sensor->id,
++		.report_id = stream->report_id,
+ 		.notify_suspend_valid = false
+ 	};
+ 	struct sns_smgr_buffering_resp resp = {};
++	struct qcom_smgr_sensor *sensor = stream->sensor;
++	struct qcom_smgr_data_type_item *data_type =
++		&sensor->data_types[stream->data_type];
+ 	struct qmi_txn txn;
+ 	u16 sample_rate = 0;
+ 	int ret;
+@@ -191,24 +190,22 @@ static int qcom_smgr_request_buffering(struct qcom_smgr *smgr,
+ 		 * report rate such that every report contains only 1 sample.
+ 		 * This gives us the lowest latency.
+ 		 */
+-		if (sensor->data_types[0].native_sample_rates)
+-			sample_rate = sensor->data_types[0].native_sample_rates
+-					[sensor->data_types[0]
+-						 .native_sample_rate_count - 1];
++		if (data_type->native_sample_rates)
++			sample_rate = data_type->native_sample_rates
++					[data_type->native_sample_rate_count - 1];
+ 
+ 		/*
+ 		 * SMGR may support a lower maximum sample rate than natively
+ 		 * supported by the sensor.
+ 		 */
+-		if (sample_rate == 0 ||
+-		    sample_rate > sensor->data_types[0].max_sample_rate)
+-			sample_rate = sensor->data_types[0].max_sample_rate;
++		if (sample_rate == 0 || sample_rate > data_type->max_sample_rate)
++			sample_rate = data_type->max_sample_rate;
+ 
+ 		req.report_rate = sample_rate * SMGR_REPORT_RATE_HZ;
+ 
+ 		req.item_len = 1;
+ 		req.items[0].sensor_id = sensor->id;
+-		req.items[0].data_type = SNS_SMGR_DATA_TYPE_PRIMARY;
++		req.items[0].data_type = stream->data_type;
+ 
+ 		req.items[0].sampling_rate = sample_rate;
+ 
+@@ -251,8 +248,8 @@ static int qcom_smgr_request_buffering(struct qcom_smgr *smgr,
+ 		return -EREMOTEIO;
+ 	}
+ 
+-	/* Keep track of requested sample rate */
+-	sensor->data_types[0].cur_sample_rate = sample_rate;
++	if (enable)
++		data_type->cur_sample_rate = sample_rate;
+ 
+ 	return 0;
+ }
+@@ -265,26 +262,21 @@ static void qcom_smgr_buffering_report_handler(struct qmi_handle *hdl,
+ 	struct qcom_smgr *smgr =
+ 		container_of(hdl, struct qcom_smgr, sns_smgr_hdl);
+ 	const struct sns_smgr_buffering_report_ind *ind = data;
++	struct qcom_smgr_stream *stream = smgr->reports[ind->report_id];
+ 	struct qcom_smgr_sensor *sensor;
+ 	struct qcom_smgr_iio_data iio_data;
+ 	int temp;
+-	u8 i, j;
+-
+-	for (i = 0; i < smgr->sensor_count; ++i) {
+-		sensor = &smgr->sensors[i];
+-
+-		/* Find sensor matching report */
+-		if (sensor->id == ind->report_id)
+-			break;
+-	}
++	u8 j;
+ 
+-	if (i == smgr->sensor_count) {
++	if (!stream) {
+ 		dev_warn_ratelimited(smgr->dev,
+ 			"Received buffering report with unknown ID: %02x",
+ 			ind->report_id);
+ 		return;
+ 	}
+ 
++	sensor = stream->sensor;
++
+ 	/*
+ 	 * Construct data to be passed to IIO. Since we are matching report rate
+ 	 * with sample rate, we only get a single sample in every report.
+@@ -305,15 +297,16 @@ static void qcom_smgr_buffering_report_handler(struct qmi_handle *hdl,
+ 	 * (sensor maxed out) and 0 when something is within range (assume
+ 	 * sensor is covered).
+ 	 */
+-	if (sensor->type == SNS_SMGR_SENSOR_TYPE_PROX_LIGHT) {
++	if (sensor->type == SNS_SMGR_SENSOR_TYPE_PROX_LIGHT &&
++	    stream->data_type == SNS_SMGR_DATA_TYPE_PRIMARY) {
+ 		temp = le32_to_cpu(iio_data.values[0]);
+ 		temp >>= SMGR_VALUE_DECIMAL_OFFSET;
+ 		temp = ~temp & 1;
+-		temp *= sensor->data_types[0].range;
++		temp *= sensor->data_types[stream->data_type].range;
+ 		iio_data.values[0] = cpu_to_le32(temp);
+ 	}
+ 
+-	iio_push_to_buffers(sensor->iio_dev, &iio_data);
++	iio_push_to_buffers(stream->iio_dev, &iio_data);
+ }
+ 
+ static const struct qmi_msg_handler qcom_smgr_msg_handlers[] = {
+@@ -331,19 +324,18 @@ static int qcom_smgr_sensor_postenable(struct iio_dev *iio_dev)
+ {
+ 	struct qcom_smgr *smgr = dev_get_drvdata(iio_dev->dev.parent);
+ 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
+-	struct qcom_smgr_sensor *sensor = priv->sensor;
+ 
+-	return qcom_smgr_request_buffering(smgr, sensor, true);
++	return qcom_smgr_request_buffering(smgr, priv->stream, true);
+ }
+ 
+ static int qcom_smgr_sensor_predisable(struct iio_dev *iio_dev)
+ {
+ 	struct qcom_smgr *smgr = dev_get_drvdata(iio_dev->dev.parent);
+ 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
+-	struct qcom_smgr_sensor *sensor = priv->sensor;
+ 
+-	dev_info(smgr->dev, "disable buffering %02x\n", sensor->id);
+-	return qcom_smgr_request_buffering(smgr, sensor, false);
++	dev_info(smgr->dev, "disable buffering %02x\n",
++		 priv->stream->report_id);
++	return qcom_smgr_request_buffering(smgr, priv->stream, false);
+ }
+ 
+ static const struct iio_buffer_setup_ops qcom_smgr_buffer_ops = {
+@@ -377,10 +369,13 @@ static int qcom_smgr_iio_read_raw(struct iio_dev *iio_dev,
+ 				  int *val2, long mask)
+ {
+ 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
++	struct qcom_smgr_stream *stream = priv->stream;
++	struct qcom_smgr_data_type_item *data_type =
++		&stream->sensor->data_types[stream->data_type];
+ 
+ 	switch (mask) {
+ 	case IIO_CHAN_INFO_SAMP_FREQ:
+-		*val = priv->sensor->data_types[0].cur_sample_rate;
++		*val = data_type->cur_sample_rate;
+ 		return IIO_VAL_INT;
+ 	case IIO_CHAN_INFO_SCALE:
+ 		*val = 1;
+@@ -396,13 +391,16 @@ static int qcom_smgr_iio_write_raw(struct iio_dev *iio_dev,
+ 				   int val2, long mask)
+ {
+ 	struct qcom_smgr_iio_priv *priv = iio_priv(iio_dev);
++	struct qcom_smgr_stream *stream = priv->stream;
++	struct qcom_smgr_data_type_item *data_type =
++		&stream->sensor->data_types[stream->data_type];
+ 
+ 	switch (mask) {
+ 	case IIO_CHAN_INFO_SAMP_FREQ:
+ 		if (!iio_device_claim_direct(iio_dev))
+ 			return -EBUSY;
+ 
+-		priv->sensor->data_types[0].cur_sample_rate = val;
++		data_type->cur_sample_rate = val;
+ 
+ 		iio_device_release_direct(iio_dev);
+ 		return 0;
+@@ -638,6 +636,34 @@ static const struct iio_chan_spec qcom_smgr_prox_iio_channels[] = {
+ 	},
+ };
+ 
++static const struct iio_chan_spec qcom_smgr_light_iio_channels[] = {
++	{
++		.type = IIO_INTENSITY,
++		.modified = true,
++		.channel2 = IIO_MOD_LIGHT_BOTH,
++		.scan_index = 0,
++		.scan_type = {
++			.sign = 'u',
++			.realbits = 32,
++			.storagebits = 32,
++			.endianness = IIO_LE,
++		},
++		.info_mask_separate = BIT(IIO_CHAN_INFO_SCALE) |
++				      BIT(IIO_CHAN_INFO_SAMP_FREQ)
++	},
++	{
++		.type = IIO_TIMESTAMP,
++		.channel = -1,
++		.scan_index = 3,
++		.scan_type = {
++			.sign = 'u',
++			.realbits = 32,
++			.storagebits = 64,
++			.endianness = IIO_LE,
++		},
++	},
++};
++
+ static const struct iio_chan_spec qcom_smgr_pressure_iio_channels[] = {
+ 	{
+ 		.type = IIO_PRESSURE,
+@@ -690,30 +716,65 @@ static const size_t qcom_smgr_sensor_type_num_channels[] = {
+ 	[SNS_SMGR_SENSOR_TYPE_PRESSURE] = ARRAY_SIZE(qcom_smgr_pressure_iio_channels)
+ };
+ 
+-static int qcom_smgr_register_sensor(struct qcom_smgr *smgr,
+-				     struct qcom_smgr_sensor *sensor)
++static int qcom_smgr_alloc_report_id(struct qcom_smgr *smgr)
+ {
++	unsigned int report_id;
++	u8 i;
++
++	for (report_id = 0; report_id < ARRAY_SIZE(smgr->reports); report_id++) {
++		if (smgr->reports[report_id])
++			continue;
++
++		for (i = 0; i < smgr->sensor_count; i++)
++			if (smgr->sensors[i].id == report_id)
++				break;
++
++		if (i == smgr->sensor_count)
++			return report_id;
++	}
++
++	return -ENOSPC;
++}
++
++static int qcom_smgr_register_stream(struct qcom_smgr *smgr,
++				     struct qcom_smgr_sensor *sensor,
++				     enum qcom_smgr_data_type data_type,
++				     u8 report_id, const char *name,
++				     const struct iio_chan_spec *channels,
++				     size_t num_channels)
++{
++	struct qcom_smgr_stream *stream;
+ 	struct iio_dev *iio_dev;
+ 	struct qcom_smgr_iio_priv *priv;
+ 	int ret;
+ 
++	if (smgr->reports[report_id])
++		return -EEXIST;
++
++	stream = devm_kzalloc(smgr->dev, sizeof(*stream), GFP_KERNEL);
++	if (!stream)
++		return -ENOMEM;
++
+ 	iio_dev = devm_iio_device_alloc(smgr->dev, sizeof(*priv));
+ 	if (!iio_dev)
+ 		return -ENOMEM;
+ 
++	stream->sensor = sensor;
++	stream->data_type = data_type;
++	stream->report_id = report_id;
++	stream->iio_dev = iio_dev;
++
+ 	priv = iio_priv(iio_dev);
+-	priv->sensor = sensor;
++	priv->stream = stream;
+ 
+ 	priv->samp_freq_vals[0] = 1;
+ 	priv->samp_freq_vals[1] = 1;
+-	priv->samp_freq_vals[2] = priv->sensor->data_types[0].max_sample_rate;
++	priv->samp_freq_vals[2] = sensor->data_types[data_type].max_sample_rate;
+ 
+-	iio_dev->name = qcom_smgr_sensor_type_device_names[sensor->type];
++	iio_dev->name = name;
+ 	iio_dev->info = &qcom_smgr_iio_info;
+-	iio_dev->channels = qcom_smgr_sensor_type_iio_channels[sensor->type];
+-	iio_dev->num_channels = qcom_smgr_sensor_type_num_channels[sensor->type];
+-
+-	sensor->iio_dev = iio_dev;
++	iio_dev->channels = channels;
++	iio_dev->num_channels = num_channels;
+ 
+ 	ret = devm_iio_kfifo_buffer_setup(smgr->dev, iio_dev,
+ 					  &qcom_smgr_buffer_ops);
+@@ -723,10 +784,13 @@ static int qcom_smgr_register_sensor(struct qcom_smgr *smgr,
+ 		return ret;
+ 	}
+ 
++	smgr->reports[report_id] = stream;
++
+ 	ret = devm_iio_device_register(smgr->dev, iio_dev);
+ 	if (ret) {
+ 		dev_err(smgr->dev, "Failed to register IIO device: %pe\n",
+ 			ERR_PTR(ret));
++		smgr->reports[report_id] = NULL;
+ 		return ret;
+ 	}
+ 
+@@ -789,25 +853,59 @@ static int qcom_smgr_probe(struct qrtr_device *qdev)
+ 
+ 		for (j = 0; j < smgr->sensors[i].data_type_count; j++) {
+ 			/* Default to maximum sample rate */
+-			smgr->sensors[i].data_types->cur_sample_rate =
+-				smgr->sensors[i].data_types->max_sample_rate;
++			smgr->sensors[i].data_types[j].cur_sample_rate =
++				smgr->sensors[i].data_types[j].max_sample_rate;
+ 
+ 			dev_dbg(smgr->dev, "0x%02x,%d: %s %s\n",
+ 				smgr->sensors[i].id, j,
+ 				smgr->sensors[i].data_types[j].vendor,
+ 				smgr->sensors[i].data_types[j].name);
+ 		}
++	}
++
++	/* Register one primary IIO stream for every supported sensor. */
++	for (i = 0; i < smgr->sensor_count; i++) {
++		struct qcom_smgr_sensor *sensor = &smgr->sensors[i];
+ 
+ 		/* Skip if sensor type is not supported */
+-		if (smgr->sensors[i].type == SNS_SMGR_SENSOR_TYPE_UNKNOWN ||
+-		    !qcom_smgr_sensor_type_iio_channels[smgr->sensors[i].type])
++		if (sensor->type == SNS_SMGR_SENSOR_TYPE_UNKNOWN ||
++		    !qcom_smgr_sensor_type_iio_channels[sensor->type])
+ 			continue;
+ 
+-		ret = qcom_smgr_register_sensor(smgr, &smgr->sensors[i]);
++		ret = qcom_smgr_register_stream(smgr, sensor,
++						SNS_SMGR_DATA_TYPE_PRIMARY,
++						sensor->id,
++						qcom_smgr_sensor_type_device_names[sensor->type],
++						qcom_smgr_sensor_type_iio_channels[sensor->type],
++						qcom_smgr_sensor_type_num_channels[sensor->type]);
+ 		if (ret)
+ 			return dev_err_probe(smgr->dev, ret,
+ 				"Failed to register sensor 0x%02x\n",
+-				smgr->sensors[i].id);
++				sensor->id);
++	}
++
++	/* Register ambient light as a separate secondary one-item stream. */
++	for (i = 0; i < smgr->sensor_count; i++) {
++		struct qcom_smgr_sensor *sensor = &smgr->sensors[i];
++
++		if (sensor->type != SNS_SMGR_SENSOR_TYPE_PROX_LIGHT ||
++		    sensor->data_type_count <= SNS_SMGR_DATA_TYPE_SECONDARY)
++			continue;
++
++		ret = qcom_smgr_alloc_report_id(smgr);
++		if (ret < 0)
++			return dev_err_probe(smgr->dev, ret,
++				"Failed to allocate light report ID\n");
++
++		ret = qcom_smgr_register_stream(smgr, sensor,
++						SNS_SMGR_DATA_TYPE_SECONDARY, ret,
++						"qcom-smgr-light",
++						qcom_smgr_light_iio_channels,
++						ARRAY_SIZE(qcom_smgr_light_iio_channels));
++		if (ret)
++			return dev_err_probe(smgr->dev, ret,
++				"Failed to register light sensor 0x%02x\n",
++				sensor->id);
+ 	}
+ 
+ 	return 0;
+diff --git a/include/linux/iio/common/qcom_smgr.h b/include/linux/iio/common/qcom_smgr.h
+index fdd3de12bb0a4..e096a1a02ffdc 100644
+--- a/include/linux/iio/common/qcom_smgr.h
++++ b/include/linux/iio/common/qcom_smgr.h
+@@ -45,17 +45,18 @@ struct qcom_smgr_sensor {
+ 	enum qcom_smgr_sensor_type type;
+ 
+ 	u8 data_type_count;
+-	/*
+-	 * Only SNS_SMGR_DATA_TYPE_PRIMARY is used at the moment, but we store
+-	 * SNS_SMGR_DATA_TYPE_SECONDARY when available as well for future use.
+-	 */
+ 	struct qcom_smgr_data_type_item *data_types;
++};
+ 
++struct qcom_smgr_stream {
++	struct qcom_smgr_sensor *sensor;
++	enum qcom_smgr_data_type data_type;
++	u8 report_id;
+ 	struct iio_dev *iio_dev;
+ };
+ 
+ struct qcom_smgr_iio_priv {
+-	struct qcom_smgr_sensor *sensor;
++	struct qcom_smgr_stream *stream;
+ 
+ 	int samp_freq_vals[3];
+ };
+@@ -75,6 +76,8 @@ struct qcom_smgr {
+ 
+ 	u8 sensor_count;
+ 	struct qcom_smgr_sensor *sensors;
++
++	struct qcom_smgr_stream *reports[256];
+ };
+ 
+ #endif /* __QCOM_SMGR_H__ */
+-- 
+2.43.0
+

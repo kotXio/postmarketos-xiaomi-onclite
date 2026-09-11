@@ -1,0 +1,122 @@
+From d751116a4e57c99bd969fca46d9b1314822f2f5f Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Thu, 10 Sep 2026 15:02:51 +0300
+Subject: [PATCH] Add runtime stock sensor registry service
+
+---
+ SConstruct      |  3 ++-
+ main.c          | 11 ++++++++++-
+ sns-reg-prepare | 27 +++++++++++++++++++++++++++
+ sns-reg.service | 19 ++++++++++++++++---
+ 4 files changed, 55 insertions(+), 5 deletions(-)
+ create mode 100755 sns-reg-prepare
+
+diff --git a/SConstruct b/SConstruct
+index e164bf2..079ba27 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -29,7 +29,8 @@ env.Program(
+ 
+ env.Program(
+ 	source = ["generator.c", map],
+-	target = "sns-reg-generator"
++	target = "sns-reg-generator",
++	LIBS = ["argp"]
+ )
+ 
+ env.Program(
+diff --git a/main.c b/main.c
+index 340e9a4..c01acad 100644
+--- a/main.c
++++ b/main.c
+@@ -139,6 +139,7 @@ out:
+ 
+ int main(int argc, const char **argv)
+ {
++	const char *registry_path = "/etc/sns-reg.d/registry.conf";
+ 	int fd;
+ 	struct stat stat;
+ 	uint64_t *registry;
+@@ -151,7 +152,15 @@ int main(int argc, const char **argv)
+ 	struct sns_reg_group_req request;
+ 	int ret;
+ 
+-	fd = open("/etc/sns-reg.d/registry.conf", O_RDONLY);
++	if (argc > 2) {
++		fprintf(stderr, "Usage: %s [REGISTRY]\n", argv[0]);
++		return 2;
++	}
++
++	if (argc == 2)
++		registry_path = argv[1];
++
++	fd = open(registry_path, O_RDONLY);
+ 	if (fd < 0) {
+ 		fprintf(stderr, "Failed to open registry: %s\n", strerror(errno));
+ 		return 1;
+diff --git a/sns-reg-prepare b/sns-reg-prepare
+new file mode 100755
+index 0000000..5f353cb
+--- /dev/null
++++ b/sns-reg-prepare
+@@ -0,0 +1,27 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-3.0-or-later
++
++set -eu
++
++input=/run/msm-firmware-loader/mnt/persist/sensors/sns.reg
++output=/run/sns-reg/registry.conf
++temporary="${output}.new"
++
++cleanup() {
++	rm -f "$temporary"
++}
++
++trap cleanup EXIT HUP INT TERM
++umask 077
++
++if ! test -r "$input"; then
++	echo "sns-reg: stock sensor registry is not readable" >&2
++	exit 1
++fi
++
++install -d -m 0700 "${output%/*}"
++sns-reg-generator "$input" > "$temporary"
++chmod 0600 "$temporary"
++mv "$temporary" "$output"
++
++trap - EXIT HUP INT TERM
+diff --git a/sns-reg.service b/sns-reg.service
+index 694b417..86add9c 100644
+--- a/sns-reg.service
++++ b/sns-reg.service
+@@ -1,9 +1,22 @@
+ [Unit]
+ Description=Qualcomm Sensor Registry server
++Wants=msm-firmware-loader.service
++After=msm-firmware-loader.service
++Before=display-manager.service
++ConditionPathExists=/run/msm-firmware-loader/mnt/persist/sensors/sns.reg
+ 
+ [Service]
+-ExecStart=/usr/bin/sns-reg
+-Restart=no
++Type=simple
++RuntimeDirectory=sns-reg
++RuntimeDirectoryMode=0700
++UMask=0077
++ExecStartPre=/usr/libexec/sns-reg-prepare
++ExecStart=/usr/bin/sns-reg /run/sns-reg/registry.conf
++Restart=always
++RestartSec=1s
++NoNewPrivileges=yes
++ProtectHome=yes
++ProtectSystem=strict
+ 
+ [Install]
+-WantedBy=basic.target
++WantedBy=multi-user.target
+-- 
+2.43.0
+

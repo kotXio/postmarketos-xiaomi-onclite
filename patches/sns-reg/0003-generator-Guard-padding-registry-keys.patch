@@ -1,0 +1,28 @@
+From 2841a73b3470b38484d36ccb4edbb607e81b5b36 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Wed, 9 Sep 2026 21:36:35 +0300
+Subject: [PATCH 3/6] generator: Guard padding registry keys
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ generator.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/generator.c b/generator.c
+index 099e367..555154d 100644
+--- a/generator.c
++++ b/generator.c
+@@ -44,9 +44,10 @@ void generate_map()
+ 			continue;
+ 
+ 		while ((key = group->keys[key_index++]).len) {
+-			if (key.id != -1)
++			if (key.id != -1) {
+ 				key_map[key.id].id = entry->addr + size;
+ 				key_map[key.id].len = key.len;
++			}
+ 
+ 			size += key.len;
+ 		}
+-- 
+2.43.0

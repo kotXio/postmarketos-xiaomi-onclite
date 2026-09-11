@@ -27,16 +27,9 @@ The existing RTL8152 driver was used for the tested USB Ethernet adapter.
 
 ## Physical validation
 
-One Redmi 7 Global (`M1810F6LG`) passed:
-
-- automatic DEVICE to HOST and HOST to DEVICE transitions;
-- empty unpowered adapter attach/remove;
-- bus-powered hub with built-in RTL8152 attach/remove;
-- measured VBUS of `5.03 V` unloaded and `4.98 V / 0.11 A` with the hub;
-- return to high-speed NCM and USB SSH in the same boot;
-- one DEVICE-mode `s2idle`/resume cycle followed by working NCM;
-- persistent r16 installation and regression testing under cumulative r25 with
-  a normal DEVICE/NCM boot.
+Automatic role switching, empty-adapter handling, a bus-powered RTL8152 hub
+and same-boot return to high-speed NCM were verified on one Redmi 7 Global
+(`M1810F6LG`).
 
 The fault IRQs registered with zero counts in normal operation. A deliberate
 short circuit or over-current test was not performed.

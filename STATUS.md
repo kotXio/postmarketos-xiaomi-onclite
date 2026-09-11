@@ -1,11 +1,12 @@
 # Device status
 
-Last updated: 2026-09-09
+Last updated: 2026-09-11
 
 Tested on one Xiaomi Redmi 7 (`onclite`), `aarch64`, with postmarketOS
 `v26.06`, Plasma Mobile and Linux `7.0.9-msm8953`. The current configuration
-uses persistent cumulative kernel package `7.0.9-r25`, tethering package
-`51-r2` and onclite gadget-lifecycle package `1-r0`.
+uses persistent cumulative kernel package `7.0.9-r28`, Sensor Registry package
+pair `0.1_git20250706-r4`, tethering package `51-r2` and onclite
+gadget-lifecycle package `1-r0`.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -26,11 +27,16 @@ uses persistent cumulative kernel package `7.0.9-r25`, tethering package
 | Battery telemetry | Working | QGauge reports presence, voltage, current, temperature, health, status, design data and approximate capacity through Linux, UPower and Plasma. |
 | Charging control | Partial | Charging state is visible and cable transitions were tested, but Linux does not configure current, voltage, JEITA, HVDCP or watchdog policy. |
 | Rear and front cameras | Not working | No camera is exposed by the current postmarketOS port. |
-| Accelerometer, proximity, light and compass | Not working | No usable sensor devices are exposed. |
+| Accelerometer and rotation | Working | LIS2HH streams through Linux IIO and SensorProxy; Plasma rotates after Auto-rotate is set to `Always`. |
+| Magnetometer | Working | AK09918 provides changing XYZ samples; application-specific compass calibration was not tested. |
+| Proximity | Working | The stk3x3x stream repeatedly reports distinct covered and open states; call-UI policy was not tested. |
+| Ambient light | Working | The stk3x3x light stream responds independently to covered, room and bright conditions; automatic-brightness policy was not tested. |
+| SAR sensor | Partial | The ADSP detects a Semtech SX932X (`0x46`, registry group `1090`), but Linux does not expose it. It is intended for RF body-proximity policy, not screen proximity. Registry groups `2500`, `2610`, `2970`, `2971`, `2980` and `2990` remain unsupported without affecting the working sensors. |
+| Gyroscope and Hall sensor | Not working | Neither device is reported by this phone's Sensor Manager. |
 | Fingerprint sensor | Not working | Not exposed by the current postmarketOS port. |
 | IR transmitter | Not working | No working Linux integration is available. |
 | FM radio | Unverified | Not enabled or tested under postmarketOS. |
-| Suspend/resume | Partial | Cable-free manual `s2idle` cycles of `369 s` and `205 s` resumed with display, touch, Wi-Fi, microSD and battery telemetry working; automatic idle suspend and sleep current remain unverified. |
+| Suspend/resume | Partial | Cable-free manual `s2idle` resumes with display, touch, sensors, Wi-Fi, microSD and battery telemetry working; automatic idle suspend and sleep current remain unverified. |
 
 ## Status vocabulary
 

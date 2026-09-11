@@ -1,0 +1,39 @@
+From d7069b6ad2c46faa002f697670ba08f069715b83 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Wed, 9 Sep 2026 18:21:38 +0300
+Subject: [PATCH 34/36] iio: qcom-smgr: Add typed QMI release action
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/iio/common/qcom_smgr/qcom_smgr.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iio/common/qcom_smgr/qcom_smgr.c b/drivers/iio/common/qcom_smgr/qcom_smgr.c
+index f8ee48d075bc3..95c717486e1ca 100644
+--- a/drivers/iio/common/qcom_smgr/qcom_smgr.c
++++ b/drivers/iio/common/qcom_smgr/qcom_smgr.c
+@@ -733,6 +733,13 @@ static int qcom_smgr_register_sensor(struct qcom_smgr *smgr,
+ 	return 0;
+ }
+ 
++static void qcom_smgr_release_qmi_handle(void *data)
++{
++	struct qmi_handle *handle = data;
++
++	qmi_handle_release(handle);
++}
++
+ static int qcom_smgr_probe(struct qrtr_device *qdev)
+ {
+ 	struct qcom_smgr *smgr;
+@@ -759,7 +766,7 @@ static int qcom_smgr_probe(struct qrtr_device *qdev)
+ 			"Failed to initialize sensor manager handle\n");
+ 
+ 	ret = devm_add_action_or_reset(smgr->dev,
+-				       (void(*)(void *))qmi_handle_release,
++				       qcom_smgr_release_qmi_handle,
+ 				       &smgr->sns_smgr_hdl);
+ 	if (ret)
+ 		return ret;
+-- 
+2.43.0

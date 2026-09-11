@@ -23,17 +23,9 @@ discharging.
 
 ## Physical validation
 
-One Redmi 7 Global (`M1810F6LG`) passed:
-
-- temporary lk2nd/fastboot boot before persistent installation;
-- three natural complete QGauge FIFO cycles;
-- unplugged discharge and USB charging transitions;
-- coherent battery temperature and voltage readings;
-- UPower and Plasma battery integration;
-- normal persistent microSD boot with kernel r25;
-- cable-free `s2idle` cycles of `369 s` and `205 s` with display, touch,
-  Wi-Fi, microSD and battery telemetry working after resume;
-- regression tests of USB-NCM, an empty OTG adapter and a hub with RTL8152.
+Battery readings, charging and discharging transitions, UPower and Plasma
+integration, and operation after suspend/resume were verified on one Redmi 7
+Global (`M1810F6LG`). The existing USB OTG and NCM paths remained working.
 
 ## Limitations
 

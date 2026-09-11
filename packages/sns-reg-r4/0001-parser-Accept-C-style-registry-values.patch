@@ -1,0 +1,185 @@
+From d1ee916752e8ba83d4343bbcbcffd6476f54fa68 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Wed, 9 Sep 2026 18:27:28 +0300
+Subject: [PATCH] parser: Accept C-style registry values
+
+---
+ SConstruct       | 12 +++++++++++-
+ main.c           |  3 ++-
+ registry.c       | 38 ++++++++++++++++++++++++++++++++++++
+ registry.h       |  8 ++++++++
+ tests/registry.c | 51 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 110 insertions(+), 2 deletions(-)
+ create mode 100644 registry.c
+ create mode 100644 registry.h
+ create mode 100644 tests/registry.c
+
+diff --git a/SConstruct b/SConstruct
+index a292882..c28b514 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -12,8 +12,12 @@ map = env.Library(
+ 	source = "map.c"
+ )
+ 
++registry = env.Library(
++	source = "registry.c"
++)
++
+ env.Program(
+-	source = ["main.c", "qmi/sns_reg.c", map],
++	source = ["main.c", "qmi/sns_reg.c", map, registry],
+ 	target = "sns-reg",
+ 	LIBS = ["qrtr"]
+ )
+@@ -28,5 +32,11 @@ env.Program(
+ 	target = "sns-reg-generator"
+ )
+ 
++env.Program(
++	source = ["tests/registry.c", registry],
++	target = "sns-reg-registry-test"
++)
++
+ env.Default("sns-reg")
+ env.Alias("tools", ["sns-reg-validator", "sns-reg-generator"])
++env.Alias("tests", ["sns-reg-registry-test"])
+diff --git a/main.c b/main.c
+index c34e6f1..af28b1c 100644
+--- a/main.c
++++ b/main.c
+@@ -20,6 +20,7 @@
+ 
+ #include "map.h"
+ #include "qmi/sns_reg.h"
++#include "registry.h"
+ 
+ #define LINE_SIZE	0x100
+ #define BUFFER_LEN	0x1000
+@@ -46,7 +47,7 @@ unsigned long *parse_registry(int fd)
+ 	}
+ 
+ 	while (fgets(line, LINE_SIZE, file)) {
+-		if (sscanf(line, "%hu %lu", &key, &value) != 2)
++		if (!parse_registry_line(line, &key, &value))
+ 			continue;
+ 
+ 		registry[key] = value;
+diff --git a/registry.c b/registry.c
+new file mode 100644
+index 0000000..dfedbe9
+--- /dev/null
++++ b/registry.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++/*
++ * Qualcomm Sensor Registry text parser
++ *
++ * Copyright (C) 2026 Kostiantyn Andriiuk
++ */
++
++#include <errno.h>
++#include <stdbool.h>
++#include <stdlib.h>
++
++#include "map.h"
++#include "registry.h"
++
++bool parse_registry_line(const char *line, unsigned short *key,
++			 unsigned long *value)
++{
++	unsigned long parsed_key;
++	char *end;
++
++	if (!line || !key || !value)
++		return false;
++
++	errno = 0;
++	parsed_key = strtoul(line, &end, 0);
++	if (end == line || errno == ERANGE || parsed_key >= KEY_MAX)
++		return false;
++
++	line = end;
++	errno = 0;
++	*value = strtoul(line, &end, 0);
++	if (end == line || errno == ERANGE)
++		return false;
++
++	*key = parsed_key;
++
++	return true;
++}
+diff --git a/registry.h b/registry.h
+new file mode 100644
+index 0000000..ff2e3d9
+--- /dev/null
++++ b/registry.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++
++#pragma once
++
++#include <stdbool.h>
++
++bool parse_registry_line(const char *line, unsigned short *key,
++			 unsigned long *value);
+diff --git a/tests/registry.c b/tests/registry.c
+new file mode 100644
+index 0000000..d3c053c
+--- /dev/null
++++ b/tests/registry.c
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++/*
++ * Qualcomm Sensor Registry parser tests
++ *
++ * Copyright (C) 2026 Kostiantyn Andriiuk
++ */
++
++#include <assert.h>
++#include <stdbool.h>
++#include <stdlib.h>
++
++#include "../registry.h"
++
++static void expect_value(const char *line, unsigned short expected_key,
++			 unsigned long expected_value)
++{
++	unsigned long value = 0;
++	unsigned short key = 0;
++	bool parsed;
++
++	parsed = parse_registry_line(line, &key, &value);
++	assert(parsed);
++	assert(key == expected_key);
++	assert(value == expected_value);
++}
++
++static void expect_rejected(const char *line)
++{
++	unsigned long value = 0;
++	unsigned short key = 0;
++
++	assert(!parse_registry_line(line, &key, &value));
++}
++
++int main(void)
++{
++	expect_value("2010 0x68 0x00010004 # i2c_address", 2010, 0x68);
++	expect_value("2009 4 0x00010004 # i2c_bus", 2009, 4);
++	expect_value("700 -2 0x00010004 # axis", 700,
++		     (unsigned long)-2);
++	expect_value("2002 0x94482e378aa52acf 0x00010004 # UUID", 2002,
++		     0x94482e378aa52acfUL);
++
++	expect_rejected("# comment");
++	expect_rejected(":version 0x00010004");
++	expect_rejected("7000 1 0x00010004");
++	expect_rejected("2010 not-a-number 0x00010004");
++	expect_rejected(NULL);
++
++	return EXIT_SUCCESS;
++}
+-- 
+2.43.0
+

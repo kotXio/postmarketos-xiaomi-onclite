@@ -1,0 +1,57 @@
+# Maintainer: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+pkgname=sns-reg
+pkgver=0.1_git20250706
+pkgrel=4
+_commit="4d238e5f0baba3fb77456fe2bffbf8e8f18a71a0"
+pkgdesc="Qualcomm Sensor Registry server"
+url="https://gitlab.com/msm8996-mainline/sns-reg"
+arch="armv7 aarch64"
+license="GPL-3.0-or-later"
+makedepends="scons qrtr-dev argp-standalone"
+subpackages="$pkgname-systemd"
+depends_systemd="msm-firmware-loader-systemd"
+source="
+	$pkgname-$_commit.tar.gz::$url/-/archive/$_commit/$pkgname-$_commit.tar.gz
+	0001-parser-Accept-C-style-registry-values.patch
+	0002-parser-Store-registry-values-as-uint64_t.patch
+	0003-generator-Guard-padding-registry-keys.patch
+	0004-Add-MSM8953-sensor-registry-groups.patch
+	0005-Make-sensor-registry-group-logging-explicit.patch
+	0006-Add-runtime-stock-sensor-registry-service.patch
+"
+builddir="$srcdir/$pkgname-$_commit"
+
+build() {
+	scons sns-reg sns-reg-generator
+}
+
+check() {
+	scons tests
+	./sns-reg-registry-test
+	./sns-reg-map-test
+}
+
+package() {
+	install -Dm755 sns-reg "$pkgdir/usr/bin/sns-reg"
+	install -Dm755 sns-reg-generator "$pkgdir/usr/bin/sns-reg-generator"
+	install -Dm755 sns-reg-prepare "$pkgdir/usr/libexec/sns-reg-prepare"
+	install -Dm644 LICENSE \
+		"$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+systemd() {
+	install_if="$pkgname=$pkgver-r$pkgrel systemd"
+	install -Dm644 "$builddir/sns-reg.service" \
+		"$subpkgdir/usr/lib/systemd/system/sns-reg.service"
+	default_systemd
+}
+
+sha512sums="
+5174bd26f74a1a332c526823c661592b831ee0719c2eb373ed6d40863214f24bea92a4d51567333187a05815a35243a25f5d7b4e174f3995c5c00d70afcad83e  sns-reg-4d238e5f0baba3fb77456fe2bffbf8e8f18a71a0.tar.gz
+c49de6f88c9fc87395ebb3847c025a87ab464d4b8ec0082f43772e6fd9e311cbdaf8c82149ac7baeb9c91398ecf890b76f6e1221b19de99246e009686307bd21  0001-parser-Accept-C-style-registry-values.patch
+88b1a291ecd4be2bc1b0764a818b724d64d843631f19a7301187633ab161a06a434c4f6078ac065ca8487768718709f8c0209d8ce8f3259ef71b49094a3ac52c  0002-parser-Store-registry-values-as-uint64_t.patch
+4f7e4bdbd9b8e2cb0e117c400384754a61bab00bebb2d152cac0a27914bc73df3b972960aa3130bf3e8ea33b346ac4591061799e2ff37cc1d9935b3776ae618f  0003-generator-Guard-padding-registry-keys.patch
+0e48d9d88e4cf14c30fe201902db0c7dd0679f7a7cff9f5b7f7d14ed3f1ff35c20dc6d835ce45bade2ca0ee80f742bbd9ae30cb8bcab00babab89205ae0a64a4  0004-Add-MSM8953-sensor-registry-groups.patch
+f97690642208dcd00c71c854ca10e5d82c14ec915c859ce67eba997b6707b317e9c4e85e9931f76bf9b937c7290911d0a74ae99020ade1e10e54304868e1e146  0005-Make-sensor-registry-group-logging-explicit.patch
+9a18d565736d73f371aa6ec723c0f46b8dca25db7c5937c1bfeed1d76700fd0c0bef72fea602ad94c14768a73e1abb169f17989c1a678b49365030646d87bd93  0006-Add-runtime-stock-sensor-registry-service.patch
+"
