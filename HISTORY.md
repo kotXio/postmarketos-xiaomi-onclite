@@ -1,5 +1,13 @@
 # Project history
 
+## 2026-09-12 — KRecorder and Angelfish
+
+- Fixed KRecorder's recording stall with the r1 process-local PulseAudio queue repair.
+- Addressed crackly playback with application-local `PULSE_LATENCY_MSEC=60`.
+- Transferred the vince WebEngine r10 package and Angelfish rendering settings.
+- Confirmed Angelfish uses the Venus hardware decoder on onclite and releases
+  it after the video tab closes.
+
 ## 2026-09-11 — Main speaker and Mic2
 
 Added cumulative kernel r31 and UCM r4:

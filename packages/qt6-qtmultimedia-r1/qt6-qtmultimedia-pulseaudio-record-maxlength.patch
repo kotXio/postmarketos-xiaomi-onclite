@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Fri, 11 Sep 2026 18:12:00 +0300
+Subject: [PATCH] multimedia: allow server record queue headroom
+
+PulseAudio record streams can deliver pathologically small fragments when Qt
+caps maxlength to the requested hardware fragment size.  This prevents clients
+that accumulate fixed-size encoder frames from making forward progress.
+
+Add a default-off process opt-in that leaves the record queue maxlength to the
+PulseAudio server while preserving the existing fragsize, stream flags, audio
+format and all playback behaviour.
+
+---
+ src/multimedia/pulseaudio/qpulseaudiosource.cpp | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/multimedia/pulseaudio/qpulseaudiosource.cpp b/src/multimedia/pulseaudio/qpulseaudiosource.cpp
+index 52416f1..d950f02 100644
+--- a/src/multimedia/pulseaudio/qpulseaudiosource.cpp
++++ b/src/multimedia/pulseaudio/qpulseaudiosource.cpp
+@@ -14,6 +14,15 @@ namespace QPulseAudioInternal {
+ 
+ using namespace QtMultimediaPrivate;
+ 
++namespace {
++bool useServerDefaultRecordMaxlength()
++{
++    static const bool enabled = qEnvironmentVariableIntValue(
++            "QT_PULSEAUDIO_RECORD_USE_SERVER_MAXLENGTH") != 0;
++    return enabled;
++}
++} // namespace
++
+ QPulseAudioSourceStream::QPulseAudioSourceStream(QAudioDevice device, const QAudioFormat &format,
+                                                  std::optional<qsizetype> ringbufferSize,
+                                                  QPulseAudioSource *parent,
+@@ -131,12 +140,15 @@ void QPulseAudioSourceStream::updateStreamIdle(bool idle)
+ bool QPulseAudioSourceStream::startStream(StreamType streamType)
+ {
+     QPulseAudioContextManager *pulseEngine = QPulseAudioContextManager::instance();
++    const bool useServerDefaultMaxlength = useServerDefaultRecordMaxlength();
+     static const bool serverIsPipewire = [&] {
+         return pulseEngine->serverName().contains(u"PulseAudio (on PipeWire");
+     }();
+ 
+     pa_buffer_attr attr{
+-        .maxlength = uint32_t(m_format.bytesForFrames(m_hardwareBufferFrames.value_or(1024))),
++        .maxlength = useServerDefaultMaxlength
++                ? uint32_t(-1)
++                : uint32_t(m_format.bytesForFrames(m_hardwareBufferFrames.value_or(1024))),
+         .tlength = uint32_t(-1),
+         .prebuf = uint32_t(-1),
+         .minreq = uint32_t(-1),
+-- 
+2.51.0

@@ -6,6 +6,9 @@ The public source is split by upstream target:
 - [`sns-reg/`](sns-reg/): six Sensor Registry patches;
 - [`pmaports/`](pmaports/): the existing USB gadget lifecycle and
   NetworkManager role-race fixes.
+- Qt changes live with their recipes under
+  [`../packages/qt6-qtmultimedia-r1/`](../packages/qt6-qtmultimedia-r1/) and
+  [`../packages/qt6-qtwebengine-r10/`](../packages/qt6-qtwebengine-r10/).
 
 ## Kernel series
 

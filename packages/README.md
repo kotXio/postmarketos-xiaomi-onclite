@@ -1,7 +1,7 @@
 # Packages and installation
 
 Compiled APKs are attached to GitHub Releases, not stored in Git. The latest
-set is
+speaker set is
 [`v2026.09.11-audio`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-audio).
 
 | Package | Purpose |
@@ -126,3 +126,61 @@ The Sensor Registry r4 packages remain installed. Package sources used for
 this release are retained under
 [`linux-postmarketos-qcom-msm8953-r31/`](linux-postmarketos-qcom-msm8953-r31/)
 and [`soc-qcom-msm8953-ucm-r4/`](soc-qcom-msm8953-ucm-r4/).
+
+## Qt application packages
+
+This userspace update is separate from the kernel/UCM installation above.
+It changes no firmware, service, microphone gain or audio route.
+
+| Package | Purpose |
+| --- | --- |
+| `qt6-qtmultimedia-6.11.1-r1.apk` | Process-local recording queue repair. |
+| `qt6-qtmultimedia-ffmpeg-6.11.1-r1.apk` | Matching FFmpeg backend used by KRecorder. |
+| `qt6-qtmultimedia-gstreamer-6.11.1-r1.apk` | Matching GStreamer runtime plugin. |
+| `qt6-qtwebengine-6.11.1-r10.apk` | Linux V4L2 decoding and multi-planar video presentation. |
+
+Tested baseline: Redmi 7 (`xiaomi,onclite`, `M1810F6LG`), `aarch64`,
+postmarketOS `v26.06` / Alpine `3.24`, Plasma Mobile, Qt `6.11.1`,
+FFmpeg `8.1.2` and PulseAudio `17.0-r7`, with kernel r31 and UCM r4.
+Starting versions were Multimedia `6.11.1-r0` and WebEngine `6.11.1-r3`;
+KRecorder and Angelfish `26.04.2-r0` are unchanged.
+Do not force these APKs over newer Qt versions or a different ABI.
+
+See [KRecorder](../fixes/krecorder.md) and [Angelfish](../fixes/angelfish.md)
+for validation limits. WebEngine is a dated Chromium 140 build, not an ongoing
+security-update channel.
+
+Save the four prior APKs and any existing per-user KRecorder/Angelfish desktop
+entries before changing them. Close both applications. Download the four
+runtime APKs and `SHA256SUMS` from the matching Qt applications Release,
+verify them, and simulate this explicit local transaction:
+
+```sh
+sha256sum -c SHA256SUMS
+apk info -v qt6-qtmultimedia qt6-qtmultimedia-ffmpeg \
+  qt6-qtmultimedia-gstreamer qt6-qtwebengine
+sudo apk add --simulate --no-network --allow-untrusted \
+  ./qt6-qtmultimedia-6.11.1-r1.apk \
+  ./qt6-qtmultimedia-ffmpeg-6.11.1-r1.apk \
+  ./qt6-qtmultimedia-gstreamer-6.11.1-r1.apk \
+  ./qt6-qtwebengine-6.11.1-r10.apk
+```
+
+Continue only if those four packages are upgraded with nothing else added,
+removed or changed. Repeat without `--simulate`; no reboot is required.
+`--allow-untrusted` allows these locally signed files but does not establish
+publisher authenticity; verify the download source and checksums. It is not
+a setting for general package upgrades.
+
+Apply the per-user launcher settings in [KRecorder](../fixes/krecorder.md)
+and [Angelfish](../fixes/angelfish.md), then reopen the apps from Plasma icons.
+The library packages alone do not enable the application-local settings.
+
+For rollback, close the apps, simulate installing the saved Multimedia r0
+base/FFmpeg/GStreamer APKs and WebEngine r3 APK, and proceed only if those four
+packages change. Restore the saved desktop entries, or remove only the
+overrides created by this procedure if none existed before. Reopen the apps;
+do not restore an old APK database or reboot for this library-only change.
+
+Sources are in [Multimedia r1](qt6-qtmultimedia-r1/README.md) and
+[WebEngine r10](qt6-qtwebengine-r10/README.md).

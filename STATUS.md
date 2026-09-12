@@ -1,6 +1,6 @@
 # Device status
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 Tested on one Xiaomi Redmi 7 (`onclite`), `aarch64`, with postmarketOS
 `v26.06`, Plasma Mobile and Linux `7.0.9-msm8953`. The current configuration
@@ -26,7 +26,10 @@ and onclite gadget-lifecycle package `1-r0`.
 | Mic2 | Working | The cleaner and slightly louder internal microphone is the Plasma Mobile default source. |
 | Headset microphone | Unverified | Its UCM route remains available but has not been physically tested. |
 | Bottom speaker | Working | The AW87329 route provides clear playback and returns the amplifier to reset while idle. |
-| Hardware video codec | Partial | Qualcomm Venus decoder/encoder V4L2 nodes exist; frame decode and encode are unverified. |
+| KRecorder | Working | Recording, Save and clean playback work with Multimedia r1 and application-local buffering; stopping audio releases the streams and switches the amplifier off. See [configuration](fixes/krecorder.md). |
+| Angelfish | Working | Browsing and Venus hardware-decoder use are verified with WebEngine r10; WebGL is disabled and the sandbox remains enabled. See [configuration](fixes/angelfish.md). |
+| Hardware video decoding | Working | Angelfish owns the Venus decoder during tested YouTube playback; closing the video tab releases it and returns Venus to idle. Not every codec/profile is verified. |
+| Hardware video encoding | Unverified | The Qualcomm Venus V4L2 encoder is exposed, but actual encoding has not been tested. |
 | Battery telemetry | Working | QGauge reports presence, voltage, current, temperature, health, status, design data and approximate capacity through Linux, UPower and Plasma. |
 | Charging control | Partial | Charging state is visible and cable transitions were tested, but Linux does not configure current, voltage, JEITA, HVDCP or watchdog policy. |
 | Rear and front cameras | Not working | No camera is exposed by the current postmarketOS port. |

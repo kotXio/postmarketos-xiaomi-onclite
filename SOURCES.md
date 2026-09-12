@@ -148,6 +148,43 @@ a new small ASoC implementation with strict profile validation and
 fail-closed reset handling. The proprietary `aw87329_kspk.bin` remains on its
 own phone and is not distributed.
 
+## Qt applications
+
+The Angelfish configuration transfers the same Qt WebEngine r10 binary used
+on [vince](https://github.com/kotXio/postmarketos-xiaomi-vince/blob/main/fixes/hardware-video.md).
+Its recipe starts from Alpine aports
+[`3ca62a2571378ee35a0e149a0e91454b57240737`](https://github.com/alpinelinux/aports/tree/3ca62a2571378ee35a0e149a0e91454b57240737/community/qt6-qtwebengine),
+Qt WebEngine `v6.11.1` and Chromium commit
+[`37b6aeaa3ef9bf7e1901aa02a317a2707557709d`](https://github.com/qt/qtwebengine-chromium/tree/37b6aeaa3ef9bf7e1901aa02a317a2707557709d).
+
+Onclite hardware-decoder use is verified independently through browser-owned
+decoder access, Venus activity during playback and release/suspension after
+the video tab closes; see [results and limits](fixes/angelfish.md#result-and-limits).
+
+- H.264 access-unit assembly retains Alexandros Frantzis / Collabora's
+  authorship, using the refresh in
+  [TI meta-arago `30a611f5`](https://git.ti.com/cgit/arago-project/meta-arago/commit/?id=30a611f56a4bd74d421e36ecddf705b956c01648).
+- Multi-planar NativePixmap support is Peter Varga's official Qt
+  [commit `ae6991d9`](https://github.com/qt/qtwebengine/commit/ae6991d950bb343accad96b96047fe605c17bcc3)
+  for `QTBUG-145344`.
+- ARM NEON type corrections adapt the
+  [openSUSE Electron patch](https://src.opensuse.org/rpm/nodejs-electron/src/commit/d74ae9ab235156a9c62c9bdc6e4fadae35888f0b3a8e0a40b41c50667213da91/mt21_util-flax-vector-conversions.patch).
+- V4L2 build plumbing, Linux per-plane NV12 selection, musl type corrections
+  and recipe integration are by Kostiantyn Andriiuk
+  <konstantin@andriyuk.com>. Alpine patches retain their original provenance
+  and Bart Ribbers's aport maintainer entry.
+
+The [recipe and six patches](packages/qt6-qtwebengine-r10/README.md) retain
+the licenses of Qt, Chromium and their upstream inputs. KRecorder and
+Angelfish application code is unchanged.
+
+The [Multimedia r1 recipe](packages/qt6-qtmultimedia-r1/README.md) uses the
+[official Qt Multimedia 6.11.1 source](https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtmultimedia-everywhere-src-6.11.1.tar.xz),
+Alpine's `select.patch` and Kostiantyn Andriiuk's recording queue repair.
+Playback buffering uses existing
+[PulseAudio v17.0 functionality](https://github.com/pulseaudio/pulseaudio/blob/v17.0/src/pulse/stream.c#L928),
+not a playback-code patch.
+
 ## Public verification identifiers
 
 - cumulative r31 kernel APK SHA-256:

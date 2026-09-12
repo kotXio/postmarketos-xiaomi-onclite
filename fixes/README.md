@@ -7,3 +7,5 @@ known limitations for each completed improvement.
 - [PMI632 QGauge battery telemetry](battery-telemetry.md)
 - [Qualcomm Sensor Manager and phone sensor streams](sensors.md)
 - [AW87329 bottom speaker and default Mic2](main-speaker.md)
+- [KRecorder recording and playback buffering](krecorder.md)
+- [Angelfish rendering and WebEngine video integration](angelfish.md)

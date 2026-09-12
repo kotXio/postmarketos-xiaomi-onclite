@@ -17,7 +17,7 @@ owner can reproduce the work safely.
 - [Project history](HISTORY.md)
 - [Verified fixes](fixes/README.md)
 - [Package and installation notes](packages/README.md)
-- [Kernel and pmaports patch series](patches/README.md)
+- [Kernel, pmaports and Qt source patches](patches/README.md)
 - [Pinned sources and provenance](SOURCES.md)
 
 ## Verified improvements
@@ -36,10 +36,12 @@ owner can reproduce the work safely.
 - Plasma Mobile automatic rotation through the standard SensorProxy service.
 - AW87329 bottom-speaker playback with fail-closed amplifier control.
 - Mic2 as the default Plasma Mobile recording source.
+- KRecorder recording queue repair and application-local playback buffering.
+- Angelfish rendering settings and verified Qualcomm Venus hardware decoding.
 
 ## Release
 
-The latest binary release is
+The speaker release is
 [`v2026.09.11-audio`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-audio).
 It contains cumulative kernel r31 and UCM r4 for the AW87329 bottom speaker
 and default Mic2 capture. It is for Xiaomi Redmi 7 (`onclite`), `aarch64`,
@@ -48,6 +50,12 @@ released r28 Sensor Manager stack.
 
 Read the exact compatibility, installation and rollback in
 [`packages/README.md`](packages/README.md) before using it.
+
+The separate [Qt application package set](packages/README.md#qt-application-packages)
+contains the recording-only Multimedia r1 and WebEngine r10 sources.
+See [KRecorder](fixes/krecorder.md) and [Angelfish](fixes/angelfish.md)
+for launcher settings and compatibility limits. APK downloads are listed on
+[GitHub Releases](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases).
 
 ## Known gaps
 
@@ -71,6 +79,8 @@ Read the exact compatibility, installation and rollback in
   test. Wired-headset audio has not been physically verified.
 - The proprietary AW87329 profile is not distributed; each phone must expose
   its own stock `aw87329_kspk.bin` through the firmware loader.
+- Browser hardware decoding works in the tested playback; not every codec or
+  stream is verified, and hardware encoding remains untested.
 
 ## Licensing
 
