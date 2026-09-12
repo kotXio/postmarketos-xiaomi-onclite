@@ -51,11 +51,13 @@ released r28 Sensor Manager stack.
 Read the exact compatibility, installation and rollback in
 [`packages/README.md`](packages/README.md) before using it.
 
-The separate [Qt application package set](packages/README.md#qt-application-packages)
-contains the recording-only Multimedia r1 and WebEngine r10 sources.
-See [KRecorder](fixes/krecorder.md) and [Angelfish](fixes/angelfish.md)
-for launcher settings and compatibility limits. APK downloads are listed on
-[GitHub Releases](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases).
+The separate
+[`v2026.09.12-qt-apps`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.12-qt-apps)
+release contains three matching Multimedia r1 runtime APKs and WebEngine r10
+for KRecorder recording/playback and Angelfish hardware video decoding.
+See [installation and rollback](packages/README.md#qt-application-packages),
+[KRecorder](fixes/krecorder.md) and [Angelfish](fixes/angelfish.md)
+for compatibility limits and the required per-user launcher settings.
 
 ## Known gaps
 

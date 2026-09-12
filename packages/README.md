@@ -152,13 +152,13 @@ security-update channel.
 
 Save the four prior APKs and any existing per-user KRecorder/Angelfish desktop
 entries before changing them. Close both applications. Download the four
-runtime APKs and `SHA256SUMS` from the matching Qt applications Release,
+runtime APKs and `SHA256SUMS` from
+[`v2026.09.12-qt-apps`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.12-qt-apps),
 verify them, and simulate this explicit local transaction:
 
 ```sh
 sha256sum -c SHA256SUMS
-apk info -v qt6-qtmultimedia qt6-qtmultimedia-ffmpeg \
-  qt6-qtmultimedia-gstreamer qt6-qtwebengine
+apk info -v | grep -E '^qt6-(qtmultimedia(-ffmpeg|-gstreamer)?|qtwebengine)-[0-9]'
 sudo apk add --simulate --no-network --allow-untrusted \
   ./qt6-qtmultimedia-6.11.1-r1.apk \
   ./qt6-qtmultimedia-ffmpeg-6.11.1-r1.apk \

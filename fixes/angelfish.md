@@ -12,13 +12,15 @@ Use only on Xiaomi Redmi 7 (`xiaomi,onclite`), `aarch64`, postmarketOS
 Angelfish desktop entry before changing them.
 
 Close Angelfish. Download `qt6-qtwebengine-6.11.1-r10.apk` and `SHA256SUMS`
-from the matching Release. Its checksum list covers all four Qt APKs; download
+from
+[`v2026.09.12-qt-apps`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.12-qt-apps).
+Its checksum list covers all four Qt APKs; download
 all four for `sha256sum -c` even when installing only WebEngine. Then verify
 and simulate the local transaction:
 
 ```sh
 sha256sum -c SHA256SUMS
-apk info -v qt6-qtwebengine
+apk info -v | grep '^qt6-qtwebengine-[0-9]'
 sudo apk add --simulate --no-network --allow-untrusted \
   ./qt6-qtwebengine-6.11.1-r10.apk
 ```
