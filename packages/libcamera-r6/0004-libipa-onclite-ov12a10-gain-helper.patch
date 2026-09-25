@@ -1,0 +1,40 @@
+From 33a9bc440e62003ce18af9f43915193685151dda Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sun, 13 Sep 2026 18:57:18 +0300
+Subject: [PATCH] libipa: add gain helper for onclite OV12A10
+
+The verified normal stock callback encodes analogue gain in 1/128
+units. Register only the diagnostic onclite-ov12a10 model; keep its
+unmeasured black level unknown and all existing factories unchanged.
+No sensor-control writes, tuning or kernel/power changes.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ src/ipa/libipa/camera_sensor_helper.cpp | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
+index e3e3e53..bd2b971 100644
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -779,6 +779,17 @@ public:
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("ov8865", CameraSensorHelperOv8865)
+ 
++class CameraSensorHelperOncliteOv12a10 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperOncliteOv12a10()
++	{
++		/* Stock callback uses 128 codes per unit of analogue gain. */
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 128 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("onclite-ov12a10", CameraSensorHelperOncliteOv12a10)
++
+ class CameraSensorHelperOv13858 : public CameraSensorHelper
+ {
+ public:
+-- 
+2.43.0
+

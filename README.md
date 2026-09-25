@@ -38,18 +38,23 @@ owner can reproduce the work safely.
 - Mic2 as the default Plasma Mobile recording source.
 - KRecorder recording queue repair and application-local playback buffering.
 - Angelfish rendering settings and verified Qualcomm Venus hardware decoding.
+- Native RAW10 capture from the OV12A10 and OV02A10 rear cameras.
 
 ## Release
 
-The speaker release is
-[`v2026.09.11-audio`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-audio).
-It contains cumulative kernel r31 and UCM r4 for the AW87329 bottom speaker
-and default Mic2 capture. It is for Xiaomi Redmi 7 (`onclite`), `aarch64`,
-postmarketOS `v26.06` and Linux `7.0.9-msm8953`, starting from the previously
-released r28 Sensor Manager stack.
+The rear-camera release is
+[`v2026.09.25-cameras`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.25-cameras).
+It contains cumulative kernel r56 and four matching libcamera `0.7.1-r6`
+packages for native OV12A10 `4096x3072` and OV02A10 `1600x1200` RAW10 capture.
+It is for Xiaomi Redmi 7 (`onclite`), `aarch64`, postmarketOS `v26.06` and
+Linux `7.0.9-msm8953`.
 
-Read the exact compatibility, installation and rollback in
-[`packages/README.md`](packages/README.md) before using it.
+Read the exact compatibility, required `cma=128M` setting, installation and
+rollback in [`packages/README.md`](packages/README.md#rear-camera-packages)
+before using it.
+
+The earlier speaker release is
+[`v2026.09.11-audio`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-audio).
 
 The separate
 [`v2026.09.12-qt-apps`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.12-qt-apps)
@@ -83,6 +88,9 @@ for compatibility limits and the required per-user launcher settings.
   its own stock `aw87329_kspk.bin` through the firmware loader.
 - Browser hardware decoding works in the tested playback; not every codec or
   stream is verified, and hardware encoding remains untested.
+- Rear cameras currently provide native RAW capture. Production AE, AWB,
+  autofocus, colour tuning, front-camera support and Plasma Camera integration
+  remain open.
 
 ## Licensing
 

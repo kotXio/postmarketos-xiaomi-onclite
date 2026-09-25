@@ -1,0 +1,31 @@
+From 3663c7a1be83cc435d20ecd8a20248f23f5b52a4 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 15 Sep 2026 12:56:19 +0300
+Subject: [PATCH 51/51] arm64: dts: qcom: onclite: supply CAMSS
+
+The clean rear-only graph enables CAMSS without its analog supply.
+
+r49 proved that pm8953_s3 is the correct rail for this device.
+
+Use that rail here, as required by the MSM8953 CAMSS binding.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
+index 7933e574b5620..b1ec2d43295a6 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
+@@ -3,6 +3,7 @@
+ 
+ &camss {
+ 	status = "okay";
++	vdda-supply = <&pm8953_s3>;
+ 
+ 	ports {
+ 		port@0 {
+-- 
+2.43.0
+

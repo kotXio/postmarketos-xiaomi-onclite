@@ -1,0 +1,38 @@
+From f24f59273211b1f9b1c9033944278dd717044f44 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 8 Sep 2026 17:59:20 +0300
+Subject: [PATCH 15/17] dt-bindings: power: supply: qcom-qg: describe PMI632
+ status observer
+
+Describe an explicit opt-in for systems that have PMI632 SMB5 charger
+state but no registered SMB5 charger driver. The observer is read-only and
+does not authorize charger configuration writes.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../devicetree/bindings/power/supply/qcom,pmi632-qg.yaml | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml b/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
+index e7dd420c5d7fe..a8d29c8614cf4 100644
+--- a/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
++++ b/Documentation/devicetree/bindings/power/supply/qcom,pmi632-qg.yaml
+@@ -58,6 +58,15 @@ properties:
+ 
+   monitored-battery: true
+ 
++  qcom,read-pmi632-smb5-status:
++    type: boolean
++    description:
++      Read the PMI632 SMB5 charge-state, power-path, USB-presence, battery
++      health and float-voltage registers to augment the fuel-gauge telemetry.
++      This is an observation-only integration for systems where no SMB5
++      charger driver is registered. The QGauge driver does not configure or
++      otherwise write the charger through this property.
++
+ required:
+   - compatible
+   - reg
+-- 
+2.43.0
+

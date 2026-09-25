@@ -1,5 +1,14 @@
 # Project history
 
+## 2026-09-25 — Rear cameras
+
+Added cumulative kernel r56 and matching libcamera `0.7.1-r6` packages:
+
+- OV12A10 rear-main RAW10 capture at `4096x3072`;
+- OV02A10 rear-auxiliary RAW10 capture at `1600x1200`;
+- sequential use of both cameras with complete resource cleanup;
+- persistent boot and camera operation after suspend/resume.
+
 ## 2026-09-12 — KRecorder and Angelfish
 
 - Fixed KRecorder's recording stall with the r1 process-local PulseAudio queue repair.

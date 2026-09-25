@@ -1,0 +1,40 @@
+From 1b7ed79533e9dc746b65091b5caebabf2b0a5abd Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Fri, 13 Mar 2026 19:40:59 +0100
+Subject: [PATCH 07/11] power: supply: qcom_pmi632_qg: fix current_now sign
+ convention
+
+The PMI632 QG hardware reports current with positive values for
+discharge and negative for charge. The power_supply sysfs ABI
+(Documentation/ABI/testing/sysfs-class-power) specifies the opposite:
+positive for charging, negative for discharging.
+
+Negate the raw reading to match the ABI, so that current_now is
+positive when the battery is charging and status reports Charging.
+
+Signed-off-by: Marc Lainez <marc.lainez@gmail.com>
+---
+ drivers/power/supply/qcom_pmi632_qg.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/supply/qcom_pmi632_qg.c b/drivers/power/supply/qcom_pmi632_qg.c
+index faca46c8b..f300380bf 100644
+--- a/drivers/power/supply/qcom_pmi632_qg.c
++++ b/drivers/power/supply/qcom_pmi632_qg.c
+@@ -198,7 +198,12 @@ static int qg_read_ibat(struct pmi632_qg *qg, int *ibat_ua)
+ 	if (ret)
+ 		return ret;
+ 
+-	*ibat_ua = QG_I_RAW_TO_UA(sign_extend32(raw, 15));
++	/*
++	 * Hardware convention: positive = discharge, negative = charge.
++	 * Power supply class convention (ABI): positive = charge, negative = discharge.
++	 * Negate to match the ABI.
++	 */
++	*ibat_ua = -QG_I_RAW_TO_UA(sign_extend32(raw, 15));
+ 	return 0;
+ }
+ 
+-- 
+2.43.0
+

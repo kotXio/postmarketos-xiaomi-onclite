@@ -1,0 +1,58 @@
+From 482281528abe4573aca27803c7f60337588884d5 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 14 Sep 2026 16:07:14 +0300
+Subject: [PATCH] libcamera: software ISP: Opt in to CPU udmabuf allocation
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ src/libcamera/software_isp/software_isp.cpp | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/src/libcamera/software_isp/software_isp.cpp b/src/libcamera/software_isp/software_isp.cpp
+index d227bd8..881db46 100644
+--- a/src/libcamera/software_isp/software_isp.cpp
++++ b/src/libcamera/software_isp/software_isp.cpp
+@@ -8,6 +8,7 @@
+ #include "libcamera/internal/software_isp/software_isp.h"
+ 
+ #include <cmath>
++#include <cstring>
+ #include <stdint.h>
+ #include <sys/mman.h>
+ #include <sys/types.h>
+@@ -39,6 +40,21 @@ namespace libcamera {
+ 
+ LOG_DEFINE_CATEGORY(SoftwareIsp)
+ 
++static DmaBufAllocator::DmaBufAllocatorFlags softwareIspAllocators()
++{
++	const char *heap = utils::secure_getenv("LIBCAMERA_SOFTISP_CPU_ALLOCATOR");
++	const char *mode = utils::secure_getenv("LIBCAMERA_SOFTISP_MODE");
++
++	/* Explicit CPU-only experiment: never fall back to a CMA allocation. */
++	if (heap && mode && !std::strcmp(heap, "udmabuf") &&
++	    !std::strcmp(mode, "cpu"))
++		return DmaBufAllocator::DmaBufAllocatorFlag::UDmaBuf;
++
++	return DmaBufAllocator::DmaBufAllocatorFlag::CmaHeap |
++	       DmaBufAllocator::DmaBufAllocatorFlag::SystemHeap |
++	       DmaBufAllocator::DmaBufAllocatorFlag::UDmaBuf;
++}
++
+ /**
+  * \class SoftwareIsp
+  * \brief Class for the Software ISP
+@@ -80,9 +96,7 @@ LOG_DEFINE_CATEGORY(SoftwareIsp)
+ SoftwareIsp::SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
+ 			 ControlInfoMap *ipaControls)
+ 	: ispWorkerThread_("SWIspWorker"),
+-	  dmaHeap_(DmaBufAllocator::DmaBufAllocatorFlag::CmaHeap |
+-		   DmaBufAllocator::DmaBufAllocatorFlag::SystemHeap |
+-		   DmaBufAllocator::DmaBufAllocatorFlag::UDmaBuf)
++	  dmaHeap_(softwareIspAllocators())
+ {
+ 	if (!dmaHeap_.isValid()) {
+ 		LOG(SoftwareIsp, Error) << "Failed to create DmaBufAllocator object";
+-- 
+2.43.0
+

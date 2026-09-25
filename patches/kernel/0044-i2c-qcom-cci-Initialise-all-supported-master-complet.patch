@@ -1,0 +1,41 @@
+From 4cb8cbe95cfcbbb4b34e443569294a9bd4dfd229 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sat, 12 Sep 2026 15:19:15 +0300
+Subject: [PATCH 44/49] i2c: qcom-cci: Initialise all supported master
+ completions
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/i2c/busses/i2c-qcom-cci.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-qcom-cci.c b/drivers/i2c/busses/i2c-qcom-cci.c
+index 884055df1560f..0c1f3b7051808 100644
+--- a/drivers/i2c/busses/i2c-qcom-cci.c
++++ b/drivers/i2c/busses/i2c-qcom-cci.c
+@@ -536,6 +536,13 @@ static int cci_probe(struct platform_device *pdev)
+ 	if (!cci->data)
+ 		return -ENOENT;
+ 
++	/*
++	 * Global reset uses master0 even if only master1 is enabled in DT.
++	 * Initialise every supported completion before IRQs or reset.
++	 */
++	for (i = 0; i < cci->data->num_masters; i++)
++		init_completion(&cci->master[i].irq_complete);
++
+ 	for_each_available_child_of_node(dev->of_node, child) {
+ 		struct cci_master *master;
+ 		u32 idx;
+@@ -571,8 +578,6 @@ static int cci_probe(struct platform_device *pdev)
+ 			else if (val == I2C_MAX_FAST_MODE_PLUS_FREQ)
+ 				master->mode = I2C_MODE_FAST_PLUS;
+ 		}
+-
+-		init_completion(&master->irq_complete);
+ 	}
+ 
+ 	/* Memory */
+-- 
+2.43.0
+

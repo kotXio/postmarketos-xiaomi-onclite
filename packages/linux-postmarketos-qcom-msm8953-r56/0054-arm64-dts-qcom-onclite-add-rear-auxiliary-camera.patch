@@ -1,0 +1,86 @@
+From e4091c9d3817fb855dcc08d394b68d37ee04a342 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 15 Sep 2026 19:11:47 +0300
+Subject: [PATCH] arm64: dts: qcom: onclite: add rear auxiliary camera
+
+Route the physically verified OV02A10 from CCI1 to CSIPHY1.
+
+Use the hash-pinned one-lane 390 MHz RAW10 contract.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../sdm632-xiaomi-onclite-rear-stream.dtsi    | 46 +++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
+index b1ec2d43295a6..fade6207b95bf 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
+@@ -14,6 +14,15 @@ onclite_rear_phy: endpoint {
+ 				remote-endpoint = <&onclite_rear_sensor>;
+ 			};
+ 		};
++
++		port@1 {
++			reg = <1>;
++			onclite_rear_aux_phy: endpoint {
++				clock-lanes = <7>;
++				data-lanes = <0>;
++				remote-endpoint = <&onclite_rear_aux_sensor>;
++			};
++		};
+ 	};
+ };
+ 
+@@ -54,6 +63,35 @@ onclite_rear_sensor: endpoint {
+ 	};
+ };
+ 
++&cci_i2c1 {
++	status = "okay";
++
++	camera@3d {
++		compatible = "xiaomi,onclite-ov02a10";
++		reg = <0x3d>;
++		clocks = <&gcc GCC_CAMSS_MCLK2_CLK>;
++		clock-names = "eclk";
++		vio-supply = <&pm8953_l6>;
++		vana-supply = <&pm8953_l22>;
++		reset-gpios = <&tlmm 131 GPIO_ACTIVE_HIGH>;
++		pinctrl-names = "active", "idle";
++		pinctrl-0 = <&camss_mclk2_default>;
++		pinctrl-1 = <&rear_aux_stream_mclk_idle>;
++		orientation = <1>;
++		rotation = <270>;
++
++		port {
++			onclite_rear_aux_sensor: endpoint {
++				clock-lanes = <0>;
++				data-lanes = <1>;
++				link-frequencies = /bits/ 64 <390000000>;
++				ovti,mipi-clock-voltage = <4>;
++				remote-endpoint = <&onclite_rear_aux_phy>;
++			};
++		};
++	};
++};
++
+ &tlmm {
+ 	rear_stream_mclk_idle: rear-stream-mclk-idle-state {
+ 		pins = "gpio26";
+@@ -62,4 +100,12 @@ rear_stream_mclk_idle: rear-stream-mclk-idle-state {
+ 		bias-pull-down;
+ 		drive-strength = <2>;
+ 	};
++
++	rear_aux_stream_mclk_idle: rear-aux-stream-mclk-idle-state {
++		pins = "gpio28";
++		function = "gpio";
++		input-enable;
++		bias-pull-down;
++		drive-strength = <2>;
++	};
+ };
+-- 
+2.43.0
+

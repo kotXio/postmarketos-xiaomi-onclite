@@ -1,0 +1,353 @@
+From 6f1686e4b33a328549faf7a4363496442497288b Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 15 Sep 2026 11:25:25 +0300
+Subject: [PATCH 49/49] media: onclite: expose both rear camera modes
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../media/i2c/xiaomi,onclite-ov12a10.yaml     |  16 +--
+ drivers/media/i2c/Kconfig                     |  12 +-
+ drivers/media/i2c/onclite-ov12a10.c           | 133 +++++++++++-------
+ 3 files changed, 100 insertions(+), 61 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml b/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml
+index 1b9b29889103b..d3c3eb6d500cf 100644
+--- a/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml
++++ b/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml
+@@ -4,19 +4,19 @@
+ $id: http://devicetree.org/schemas/media/i2c/xiaomi,onclite-ov12a10.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+ 
+-title: Experimental Xiaomi Redmi 7 OV12A10 rear camera
++title: Xiaomi Redmi 7 OV12A10 rear camera
+ 
+ maintainers:
+   - Kostiantyn Andriiuk <konstantin@andriyuk.com>
+ 
+ description: |
+-  Board-specific opt-in RAW10 experiment. Default fixed 2048x1536; optional
+-  full_resolution=1 selects fixed 4096x3072 only at module load. Register only
+-  with manual run=1. Explicit STREAMON uses stock MCLK0 24 MHz,
+-  reset40, analog gate138, shared L6 1.8 V, L2 1.175 V and L17 2.85 V. No L22
+-  AVDD consumer, OTP, EEPROM, actuator, flash or exposure/gain writes outside
+-  the selected stock tables. STREAMOFF synchronously restores off-state L2
+-  voltage and clock rate. No default pinctrl or assigned clock side effects.
++  Board-specific RAW10 sensor exposing the verified 2048x1536 and 4096x3072
++  stock modes. STREAMON uses stock MCLK0 24 MHz, reset40, analog gate138,
++  shared L6 1.8 V, L2 1.175 V and L17 2.85 V. The sensor remains powered off
++  during probe. No L22 AVDD consumer, OTP, EEPROM, actuator, flash or
++  exposure/gain writes outside the selected stock tables. STREAMOFF
++  synchronously restores off-state L2 voltage and clock rate. No default
++  pinctrl or assigned clock side effects.
+ 
+ allOf:
+   - $ref: /schemas/media/video-interface-devices.yaml#
+diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
+index 1ceaaac2ddcfa..75f141225836e 100644
+--- a/drivers/media/i2c/Kconfig
++++ b/drivers/media/i2c/Kconfig
+@@ -6,15 +6,15 @@
+ if VIDEO_DEV
+ 
+ config VIDEO_ONCLITE_OV12A10
+-	tristate "Opt-in OV12A10 first light for Xiaomi Redmi 7"
++	tristate "OV12A10 rear camera for Xiaomi Redmi 7"
+ 	depends on I2C && OF && GPIOLIB && REGULATOR && COMMON_CLK
+ 	select V4L2_CCI_I2C
+ 	help
+-	  RAW10 rear sensor. Default off; manual run=1 only, fixed 2048x1536.
+-	  Optional full_resolution=1 selects fixed 4096x3072 at module load.
+-	  Power is synchronous and controls stay at selected stock values.
+-	  No automatic power-up at probe or runtime-PM resume.
+-	  The first experiment has no AE, gain, flash or autofocus controls.
++	  Board-specific RAW10 rear sensor for Xiaomi Redmi 7. The driver
++	  exposes the verified 2048x1536 and 4096x3072 stock modes. Hardware
++	  remains powered off at probe and powers up only for STREAMON.
++	  Exposure and gain remain fixed to the selected stock mode; autofocus,
++	  flash, OTP and EEPROM support are not implemented yet.
+ 
+ comment "IR I2C driver auto-selected by 'Autoselect ancillary drivers'"
+ 	depends on MEDIA_SUBDRV_AUTOSELECT && I2C && RC_CORE
+diff --git a/drivers/media/i2c/onclite-ov12a10.c b/drivers/media/i2c/onclite-ov12a10.c
+index c3ab96dbb07cd..5664ac2e5e34b 100644
+--- a/drivers/media/i2c/onclite-ov12a10.c
++++ b/drivers/media/i2c/onclite-ov12a10.c
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * Opt-in, fixed-mode OV12A10 first-light driver for Xiaomi onclite.
+- * Mode selected only at module load; ordinary default is 2048x1536.
++ * OV12A10 rear-camera driver for Xiaomi onclite.
++ * The default mode is 2048x1536; 4096x3072 is also selectable through V4L2.
+  * Based on the public GPL vince driver by Kostiantyn Andriiuk.
+  * Selected stock init differences privately checked; no original blob/code
+  * redistributed. Link/external HTS derived from descriptor, not measured.
+@@ -13,7 +13,6 @@
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/module.h>
+-#include <linux/atomic.h>
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/pinctrl/consumer.h>
+@@ -31,12 +30,8 @@
+ #define OV12A10_DATA_LANES		4
+ #define OV12A10_BITS_PER_SAMPLE		10
+ 
+-#define OV12A10_WIDTH			(full_resolution ? 4096 : 2048)
+-#define OV12A10_HEIGHT			(full_resolution ? 3072 : 1536)
+ /* floor(1064 * 464 MHz / 108 MHz), in external pixel-rate units. */
+ #define OV12A10_HTS			4571
+-#define OV12A10_VTS			(full_resolution ? 3377 : 3346)
+-#define OV12A10_HBLANK			(OV12A10_HTS - OV12A10_WIDTH)
+ 
+ #define OV12A10_REG_CHIP_ID		CCI_REG16(0x300b)
+ #define OV12A10_CHIP_ID			0x1241
+@@ -45,7 +40,6 @@
+ #define OV12A10_MODE_STREAMING		0x01
+ 
+ #define OV12A10_EXPOSURE_STEP		1
+-#define OV12A10_EXPOSURE_DEFAULT	(full_resolution ? 2816 : 1682)
+ 
+ #define OV12A10_ANAL_GAIN_STEP		1
+ #define OV12A10_ANAL_GAIN_DEFAULT	512
+@@ -54,6 +48,15 @@
+ #define OV12A10_DOVDD_UV		1800000
+ #define OV12A10_VAF_UV			2850000
+ 
++struct ov12a10_mode {
++	u32 width;
++	u32 height;
++	u32 vts;
++	u32 exposure;
++	const struct cci_reg_sequence *regs;
++	unsigned int num_regs;
++};
++
+ struct ov12a10 {
+ 	struct device *dev;
+ 	struct regmap *regmap;
+@@ -87,17 +90,9 @@ struct ov12a10 {
+ 	struct v4l2_ctrl *vblank;
+ 	struct v4l2_ctrl *exposure;
+ 	struct v4l2_ctrl *analogue_gain;
++	const struct ov12a10_mode *cur_mode;
+ };
+ 
+-static bool run;
+-module_param(run, bool, 0400);
+-MODULE_PARM_DESC(run, "Register fixed-mode rear sensor, powered only by STREAMON");
+-static atomic_t attempted = ATOMIC_INIT(0);
+-/* Immutable per load: no runtime mode or exposure/gain switching. */
+-static bool full_resolution;
+-module_param(full_resolution, bool, 0400);
+-MODULE_PARM_DESC(full_resolution, "Select 4096x3072 RAW10 at load; default 2048x1536");
+-
+ static inline struct ov12a10 *to_ov12a10(struct v4l2_subdev *sd)
+ {
+ 	return container_of(sd, struct ov12a10, sd);
+@@ -373,10 +368,32 @@ static const struct cci_reg_sequence ov12a10_4096x3072_regs[] = {
+ 	{ CCI_REG8(0x3813), 0x08 },
+ };
+ 
++static const struct ov12a10_mode ov12a10_modes[] = {
++	{
++		.width = 2048,
++		.height = 1536,
++		.vts = 3346,
++		.exposure = 1682,
++		.regs = ov12a10_2048x1536_regs,
++		.num_regs = ARRAY_SIZE(ov12a10_2048x1536_regs),
++	},
++	{
++		.width = 4096,
++		.height = 3072,
++		.vts = 3377,
++		.exposure = 2816,
++		.regs = ov12a10_4096x3072_regs,
++		.num_regs = ARRAY_SIZE(ov12a10_4096x3072_regs),
++	},
++};
++
+ static int ov12a10_init_controls(struct ov12a10 *ov12a10)
+ {
+ 	struct v4l2_ctrl_handler *handler = &ov12a10->ctrl_handler;
++	const struct ov12a10_mode *mode = ov12a10->cur_mode;
+ 	struct v4l2_fwnode_device_properties props;
++	s64 hblank = OV12A10_HTS - mode->width;
++	s64 vblank = mode->vts - mode->height;
+ 	int ret;
+ 
+ 	v4l2_ctrl_handler_init(handler, 8);
+@@ -398,23 +415,19 @@ static int ov12a10_init_controls(struct ov12a10 *ov12a10)
+ 
+ 	ov12a10->hblank =
+ 		v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
+-				  OV12A10_HBLANK, OV12A10_HBLANK, 1,
+-				  OV12A10_HBLANK);
++				  hblank, hblank, 1, hblank);
+ 	if (ov12a10->hblank)
+ 		ov12a10->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+ 
+ 	ov12a10->vblank =
+ 		v4l2_ctrl_new_std(handler, NULL, V4L2_CID_VBLANK,
+-				  OV12A10_VTS - OV12A10_HEIGHT,
+-				  OV12A10_VTS - OV12A10_HEIGHT, 1,
+-				  OV12A10_VTS - OV12A10_HEIGHT);
++				  vblank, vblank, 1, vblank);
+ 
+ 	ov12a10->exposure =
+ 		v4l2_ctrl_new_std(handler, NULL, V4L2_CID_EXPOSURE,
+-				  OV12A10_EXPOSURE_DEFAULT,
+-				  OV12A10_EXPOSURE_DEFAULT,
++				  mode->exposure, mode->exposure,
+ 				  OV12A10_EXPOSURE_STEP,
+-				  OV12A10_EXPOSURE_DEFAULT);
++				  mode->exposure);
+ 
+ 	ov12a10->analogue_gain =
+ 		v4l2_ctrl_new_std(handler, NULL,
+@@ -454,10 +467,11 @@ static int ov12a10_init_controls(struct ov12a10 *ov12a10)
+ 	return ret;
+ }
+ 
+-static void ov12a10_update_pad_format(struct v4l2_mbus_framefmt *format)
++static void ov12a10_update_pad_format(const struct ov12a10_mode *mode,
++				      struct v4l2_mbus_framefmt *format)
+ {
+-	format->width = OV12A10_WIDTH;
+-	format->height = OV12A10_HEIGHT;
++	format->width = mode->width;
++	format->height = mode->height;
+ 	format->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+ 	format->field = V4L2_FIELD_NONE;
+ 	format->colorspace = V4L2_COLORSPACE_RAW;
+@@ -466,12 +480,39 @@ static void ov12a10_update_pad_format(struct v4l2_mbus_framefmt *format)
+ 	format->xfer_func = V4L2_XFER_FUNC_NONE;
+ }
+ 
++static void ov12a10_update_controls(struct ov12a10 *ov12a10,
++				    const struct ov12a10_mode *mode)
++{
++	s64 hblank = OV12A10_HTS - mode->width;
++	s64 vblank = mode->vts - mode->height;
++
++	__v4l2_ctrl_modify_range(ov12a10->hblank, hblank, hblank, 1,
++				 hblank);
++	__v4l2_ctrl_modify_range(ov12a10->vblank, vblank, vblank, 1,
++				 vblank);
++	__v4l2_ctrl_modify_range(ov12a10->exposure, mode->exposure,
++				 mode->exposure, OV12A10_EXPOSURE_STEP,
++				 mode->exposure);
++}
++
+ static int ov12a10_set_pad_format(struct v4l2_subdev *sd,
+ 				  struct v4l2_subdev_state *state,
+ 				  struct v4l2_subdev_format *format)
+ {
+-	ov12a10_update_pad_format(&format->format);
++	struct ov12a10 *ov12a10 = to_ov12a10(sd);
++	const struct ov12a10_mode *mode;
++
++	mode = v4l2_find_nearest_size(ov12a10_modes,
++				      ARRAY_SIZE(ov12a10_modes),
++				      width, height,
++				      format->format.width,
++				      format->format.height);
++	ov12a10_update_pad_format(mode, &format->format);
+ 	*v4l2_subdev_state_get_format(state, format->pad) = format->format;
++	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
++		ov12a10->cur_mode = mode;
++		ov12a10_update_controls(ov12a10, mode);
++	}
+ 
+ 	return 0;
+ }
+@@ -492,13 +533,17 @@ static int ov12a10_enum_frame_size(struct v4l2_subdev *sd,
+ 				   struct v4l2_subdev_state *state,
+ 				   struct v4l2_subdev_frame_size_enum *fse)
+ {
+-	if (fse->index || fse->code != MEDIA_BUS_FMT_SBGGR10_1X10)
++	const struct ov12a10_mode *mode;
++
++	if (fse->index >= ARRAY_SIZE(ov12a10_modes) ||
++	    fse->code != MEDIA_BUS_FMT_SBGGR10_1X10)
+ 		return -EINVAL;
++	mode = &ov12a10_modes[fse->index];
+ 
+-	fse->min_width = OV12A10_WIDTH;
+-	fse->max_width = OV12A10_WIDTH;
+-	fse->min_height = OV12A10_HEIGHT;
+-	fse->max_height = OV12A10_HEIGHT;
++	fse->min_width = mode->width;
++	fse->max_width = mode->width;
++	fse->min_height = mode->height;
++	fse->max_height = mode->height;
+ 
+ 	return 0;
+ }
+@@ -527,7 +572,8 @@ static int ov12a10_get_selection(struct v4l2_subdev *sd,
+ static int ov12a10_init_state(struct v4l2_subdev *sd,
+ 			      struct v4l2_subdev_state *state)
+ {
+-	ov12a10_update_pad_format(v4l2_subdev_state_get_format(state, 0));
++	ov12a10_update_pad_format(&ov12a10_modes[0],
++				      v4l2_subdev_state_get_format(state, 0));
+ 	*v4l2_subdev_state_get_crop(state, 0) =
+ 		(struct v4l2_rect) { 8, 8, 4096, 3072 };
+ 
+@@ -709,12 +755,8 @@ static int ov12a10_start(struct ov12a10 *p)
+ 	ret = ov12a10_identify(p);
+ 	cci_multi_reg_write(p->regmap, ov12a10_init_regs,
+ 			    ARRAY_SIZE(ov12a10_init_regs), &ret);
+-	if (full_resolution)
+-		cci_multi_reg_write(p->regmap, ov12a10_4096x3072_regs,
+-				    ARRAY_SIZE(ov12a10_4096x3072_regs), &ret);
+-	else
+-		cci_multi_reg_write(p->regmap, ov12a10_2048x1536_regs,
+-				    ARRAY_SIZE(ov12a10_2048x1536_regs), &ret);
++	cci_multi_reg_write(p->regmap, p->cur_mode->regs,
++			    p->cur_mode->num_regs, &ret);
+ 	cci_write(p->regmap, OV12A10_REG_MODE_SELECT,
+ 		  OV12A10_MODE_STREAMING, &ret);
+ 	if (!ret)
+@@ -924,9 +966,6 @@ static int ov12a10_probe(struct i2c_client *client)
+ 	u32 master;
+ 	int ret;
+ 
+-	/* Must precede all allocations, GPIO muxing, supply and clock requests. */
+-	if (!run)
+-		return -ENODEV;
+ 	if (!of_machine_is_compatible("xiaomi,onclite") ||
+ 	    client->addr != 0x10 || (client->flags & I2C_CLIENT_TEN) ||
+ 	    !bus || !of_device_is_compatible(bus->parent, "qcom,msm8953-cci") ||
+@@ -935,8 +974,6 @@ static int ov12a10_probe(struct i2c_client *client)
+ 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C) ||
+ 	    client->adapter->retries)
+ 		return -EOPNOTSUPP;
+-	if (atomic_cmpxchg(&attempted, 0, 1))
+-		return -EBUSY;
+ 	p = devm_kzalloc(&client->dev, sizeof(*p), GFP_KERNEL);
+ 	if (!p)
+ 		return -ENOMEM;
+@@ -953,6 +990,7 @@ static int ov12a10_probe(struct i2c_client *client)
+ 	if (IS_ERR(p->regmap))
+ 		return PTR_ERR(p->regmap);
+ 	/* No power cycle, chip read, register setup or PCM-like open at probe. */
++	p->cur_mode = &ov12a10_modes[0];
+ 	ret = ov12a10_init_controls(p);
+ 	if (ret)
+ 		return ret;
+@@ -971,7 +1009,8 @@ static int ov12a10_probe(struct i2c_client *client)
+ 	ret = v4l2_async_register_subdev_sensor(&p->sd);
+ 	if (ret)
+ 		goto cleanup_subdev;
+-	dev_info(p->dev, "rear-stream registered OFF; fixed stock mode, explicit STREAMON only\n");
++	dev_info(p->dev,
++		 "rear sensor registered OFF; 2048x1536 and 4096x3072 stock modes\n");
+ 	return 0;
+ cleanup_subdev:
+ 	v4l2_subdev_cleanup(&p->sd);
+-- 
+2.43.0
+

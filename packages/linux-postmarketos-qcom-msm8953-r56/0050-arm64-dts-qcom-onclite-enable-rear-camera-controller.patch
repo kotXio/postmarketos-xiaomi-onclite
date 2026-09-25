@@ -1,0 +1,35 @@
+From 93cdeb6c1f957b7982aa1e51e6db29090c1fcf0f Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 15 Sep 2026 12:21:43 +0300
+Subject: [PATCH] arm64: dts: qcom: onclite: enable rear camera controllers
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi      | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
+index 197ebdbf55a7c..7933e574b5620 100644
+--- a/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
++++ b/arch/arm64/boot/dts/qcom/sdm632-xiaomi-onclite-rear-stream.dtsi
+@@ -2,6 +2,8 @@
+ /* Copyright (c) 2026 Kostiantyn Andriiuk <konstantin@andriyuk.com> */
+ 
+ &camss {
++	status = "okay";
++
+ 	ports {
+ 		port@0 {
+ 			reg = <0>;
+@@ -16,6 +18,8 @@ onclite_rear_phy: endpoint {
+ 
+ &cci {
+ 	pinctrl-0 = <&cci0_default &cci1_default>;
++
++	status = "okay";
+ };
+ 
+ &cci_i2c0 {
+-- 
+2.43.0
+

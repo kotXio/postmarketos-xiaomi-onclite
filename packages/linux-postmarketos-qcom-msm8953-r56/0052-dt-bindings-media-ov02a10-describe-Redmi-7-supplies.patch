@@ -1,0 +1,76 @@
+From f2df62e015fbd6844730b879ea71069e16238688 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 15 Sep 2026 19:11:46 +0300
+Subject: [PATCH] dt-bindings: media: ov02a10: describe Redmi 7 supplies
+
+Describe the proven two-supply Redmi 7 board variant.
+
+Keep the generic three-supply and powerdown requirements intact.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../bindings/media/i2c/ovti,ov02a10.yaml      | 31 ++++++++++++++++---
+ 1 file changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/i2c/ovti,ov02a10.yaml b/Documentation/devicetree/bindings/media/i2c/ovti,ov02a10.yaml
+index 0e1d9c3901806..0608d588bfb1a 100644
+--- a/Documentation/devicetree/bindings/media/i2c/ovti,ov02a10.yaml
++++ b/Documentation/devicetree/bindings/media/i2c/ovti,ov02a10.yaml
+@@ -19,10 +19,27 @@ description: |-
+ 
+ allOf:
+   - $ref: /schemas/media/video-interface-devices.yaml#
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: xiaomi,onclite-ov02a10
++    then:
++      required:
++        - vio-supply
++        - vana-supply
++    else:
++      required:
++        - dovdd-supply
++        - avdd-supply
++        - dvdd-supply
++        - powerdown-gpios
+ 
+ properties:
+   compatible:
+-    const: ovti,ov02a10
++    enum:
++      - ovti,ov02a10
++      - xiaomi,onclite-ov02a10
+ 
+   reg:
+     maxItems: 1
+@@ -49,6 +66,14 @@ properties:
+     description:
+       Definition of the regulator used as Analog voltage supply.
+ 
++  vio-supply:
++    description:
++      Redmi 7 shared 1.8 V sensor I/O supply.
++
++  vana-supply:
++    description:
++      Redmi 7 2.8 V sensor analogue supply.
++
+   dvdd-supply:
+     description:
+       Definition of the regulator used as Digital core voltage supply.
+@@ -101,10 +126,6 @@ required:
+   - reg
+   - clocks
+   - clock-names
+-  - dovdd-supply
+-  - avdd-supply
+-  - dvdd-supply
+-  - powerdown-gpios
+   - reset-gpios
+   - port
+ 
+-- 
+2.43.0
+

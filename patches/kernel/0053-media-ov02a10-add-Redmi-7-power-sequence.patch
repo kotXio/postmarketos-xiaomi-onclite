@@ -1,0 +1,344 @@
+From f256b79a0251e33e001f813023befeadd56b96d4 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Tue, 15 Sep 2026 19:11:47 +0300
+Subject: [PATCH] media: ov02a10: add Redmi 7 power sequence
+
+Keep the generic sensor path intact.
+
+Add stock-ordered two-rail, reset and MCLK sequencing.
+
+Select it only for the onclite compatible.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ drivers/media/i2c/ov02a10.c | 221 +++++++++++++++++++++++++++++++++---
+ 1 file changed, 206 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/media/i2c/ov02a10.c b/drivers/media/i2c/ov02a10.c
+index 70d9d7c43f187..3b1db8f54cc0b 100644
+--- a/drivers/media/i2c/ov02a10.c
++++ b/drivers/media/i2c/ov02a10.c
+@@ -8,6 +8,7 @@
+ #include <linux/i2c.h>
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
++#include <linux/pinctrl/consumer.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/units.h>
+ #include <media/media-entity.h>
+@@ -80,6 +81,10 @@ static const char * const ov02a10_supply_names[] = {
+ 	"dvdd",		/* Digital core power */
+ };
+ 
++struct ov02a10_hwcfg {
++	bool onclite_power;
++};
++
+ struct ov02a10_reg {
+ 	u8 addr;
+ 	u8 val;
+@@ -110,6 +115,19 @@ struct ov02a10 {
+ 	struct gpio_desc *rst_gpio;
+ 	struct regulator_bulk_data supplies[ARRAY_SIZE(ov02a10_supply_names)];
+ 
++	bool onclite_power;
++	struct regulator *onclite_vio;
++	struct regulator *onclite_vana;
++	struct pinctrl *onclite_pinctrl;
++	struct pinctrl_state *onclite_active;
++	struct pinctrl_state *onclite_idle;
++	unsigned long onclite_old_rate;
++	bool onclite_rate_attempted;
++	bool onclite_vana_on;
++	bool onclite_vio_on;
++	bool onclite_clock_on;
++	bool onclite_pins_active;
++
+ 	bool streaming;
+ 	bool upside_down;
+ 
+@@ -400,6 +418,115 @@ static int ov02a10_check_sensor_id(struct ov02a10 *ov02a10)
+ 	return 0;
+ }
+ 
++static int ov02a10_onclite_power_off(struct ov02a10 *ov02a10)
++{
++	int error = 0;
++	int ret;
++
++	/* Exact stock unwind: assert reset, stop MCLK, VIO, then VANA. */
++	gpiod_set_value_cansleep(ov02a10->rst_gpio, 1);
++	usleep_range(5000, 6000);
++
++	if (ov02a10->onclite_clock_on) {
++		clk_disable_unprepare(ov02a10->eclk);
++		ov02a10->onclite_clock_on = false;
++		usleep_range(10000, 11000);
++	}
++
++	if (ov02a10->onclite_pins_active) {
++		ret = pinctrl_select_state(ov02a10->onclite_pinctrl,
++					   ov02a10->onclite_idle);
++		if (ret)
++			error = ret;
++		else
++			ov02a10->onclite_pins_active = false;
++	}
++
++	if (ov02a10->onclite_vio_on) {
++		ret = regulator_disable(ov02a10->onclite_vio);
++		if (ret && !error)
++			error = ret;
++		else if (!ret)
++			ov02a10->onclite_vio_on = false;
++	}
++
++	if (ov02a10->onclite_vana_on) {
++		ret = regulator_disable(ov02a10->onclite_vana);
++		if (ret && !error)
++			error = ret;
++		else if (!ret)
++			ov02a10->onclite_vana_on = false;
++	}
++
++	if (ov02a10->onclite_rate_attempted) {
++		ret = clk_set_rate(ov02a10->eclk, ov02a10->onclite_old_rate);
++		if (ret && !error)
++			error = ret;
++		else if (!ret)
++			ov02a10->onclite_rate_attempted = false;
++	}
++
++	return error;
++}
++
++static int ov02a10_onclite_power_on(struct ov02a10 *ov02a10)
++{
++	int off_ret;
++	int ret;
++
++	if (ov02a10->onclite_rate_attempted || ov02a10->onclite_vana_on ||
++	    ov02a10->onclite_vio_on || ov02a10->onclite_clock_on ||
++	    ov02a10->onclite_pins_active)
++		return -EBUSY;
++
++	ov02a10->onclite_rate_attempted = true;
++	ret = clk_set_rate(ov02a10->eclk, OV02A10_ECLK_FREQ);
++	if (ret)
++		goto off;
++	if (clk_get_rate(ov02a10->eclk) != OV02A10_ECLK_FREQ) {
++		ret = -EINVAL;
++		goto off;
++	}
++
++	/* Exact selected stock order; logical reset high is physical high. */
++	gpiod_set_value_cansleep(ov02a10->rst_gpio, 1);
++	usleep_range(1000, 2000);
++
++	ret = regulator_enable(ov02a10->onclite_vana);
++	if (ret)
++		goto off;
++	ov02a10->onclite_vana_on = true;
++	usleep_range(5000, 6000);
++
++	ret = regulator_enable(ov02a10->onclite_vio);
++	if (ret)
++		goto off;
++	ov02a10->onclite_vio_on = true;
++	usleep_range(5000, 6000);
++
++	gpiod_set_value_cansleep(ov02a10->rst_gpio, 0);
++	usleep_range(5000, 6000);
++
++	ret = pinctrl_select_state(ov02a10->onclite_pinctrl,
++				   ov02a10->onclite_active);
++	if (ret)
++		goto off;
++	ov02a10->onclite_pins_active = true;
++
++	ret = clk_prepare_enable(ov02a10->eclk);
++	if (ret)
++		goto off;
++	ov02a10->onclite_clock_on = true;
++	usleep_range(10000, 11000);
++
++	ret = ov02a10_check_sensor_id(ov02a10);
++	if (!ret)
++		return 0;
++off:
++	off_ret = ov02a10_onclite_power_off(ov02a10);
++	return off_ret ? off_ret : ret;
++}
++
+ static int ov02a10_power_on(struct device *dev)
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+@@ -407,6 +534,9 @@ static int ov02a10_power_on(struct device *dev)
+ 	struct ov02a10 *ov02a10 = to_ov02a10(sd);
+ 	int ret;
+ 
++	if (ov02a10->onclite_power)
++		return ov02a10_onclite_power_on(ov02a10);
++
+ 	gpiod_set_value_cansleep(ov02a10->rst_gpio, 1);
+ 	gpiod_set_value_cansleep(ov02a10->pd_gpio, 1);
+ 
+@@ -451,6 +581,9 @@ static int ov02a10_power_off(struct device *dev)
+ 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+ 	struct ov02a10 *ov02a10 = to_ov02a10(sd);
+ 
++	if (ov02a10->onclite_power)
++		return ov02a10_onclite_power_off(ov02a10);
++
+ 	gpiod_set_value_cansleep(ov02a10->rst_gpio, 1);
+ 	clk_disable_unprepare(ov02a10->eclk);
+ 	gpiod_set_value_cansleep(ov02a10->pd_gpio, 1);
+@@ -472,6 +605,9 @@ static int __ov02a10_start_stream(struct ov02a10 *ov02a10)
+ 	if (ret)
+ 		return ret;
+ 
++	if (ov02a10->onclite_power)
++		msleep(60);
++
+ 	/* Apply customized values from user */
+ 	ret = __v4l2_ctrl_handler_setup(ov02a10->subdev.ctrl_handler);
+ 	if (ret)
+@@ -821,9 +957,15 @@ static int ov02a10_check_hwcfg(struct device *dev, struct ov02a10 *ov02a10)
+ 		return -ENXIO;
+ 
+ 	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
+-	fwnode_handle_put(ep);
+ 	if (ret)
+-		return ret;
++		goto out_put;
++
++	if (ov02a10->onclite_power &&
++	    bus_cfg.bus.mipi_csi2.num_data_lanes != OV02A10_DATA_LANES) {
++		dev_err(dev, "onclite requires exactly one CSI-2 data lane\n");
++		ret = -EINVAL;
++		goto out_free;
++	}
+ 
+ 	/* Optional indication of MIPI clock voltage unit */
+ 	ret = fwnode_property_read_u32(ep, "ovti,mipi-clock-voltage",
+@@ -847,8 +989,10 @@ static int ov02a10_check_hwcfg(struct device *dev, struct ov02a10 *ov02a10)
+ 		}
+ 	}
+ 
++out_free:
+ 	v4l2_fwnode_endpoint_free(&bus_cfg);
+-
++out_put:
++	fwnode_handle_put(ep);
+ 	return ret;
+ }
+ 
+@@ -856,6 +1000,7 @@ static int ov02a10_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+ 	struct ov02a10 *ov02a10;
++	const struct ov02a10_hwcfg *hwcfg;
+ 	unsigned int i;
+ 	unsigned int rotation;
+ 	int ret;
+@@ -866,6 +1011,11 @@ static int ov02a10_probe(struct i2c_client *client)
+ 
+ 	ov02a10->dev = dev;
+ 
++	hwcfg = device_get_match_data(dev);
++	if (!hwcfg)
++		return -EINVAL;
++	ov02a10->onclite_power = hwcfg->onclite_power;
++
+ 	ret = ov02a10_check_hwcfg(dev, ov02a10);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret,
+@@ -893,23 +1043,57 @@ static int ov02a10_probe(struct i2c_client *client)
+ 	if (clk_get_rate(ov02a10->eclk) != OV02A10_ECLK_FREQ)
+ 		dev_warn(dev, "eclk mismatched, mode is based on 24MHz\n");
+ 
+-	ov02a10->pd_gpio = devm_gpiod_get(dev, "powerdown", GPIOD_OUT_HIGH);
+-	if (IS_ERR(ov02a10->pd_gpio))
+-		return dev_err_probe(dev, PTR_ERR(ov02a10->pd_gpio),
+-				     "failed to get powerdown-gpios\n");
++	if (!ov02a10->onclite_power) {
++		ov02a10->pd_gpio = devm_gpiod_get(dev, "powerdown", GPIOD_OUT_HIGH);
++		if (IS_ERR(ov02a10->pd_gpio))
++			return dev_err_probe(dev, PTR_ERR(ov02a10->pd_gpio),
++					     "failed to get powerdown-gpios\n");
++	}
+ 
+ 	ov02a10->rst_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
+ 	if (IS_ERR(ov02a10->rst_gpio))
+ 		return dev_err_probe(dev, PTR_ERR(ov02a10->rst_gpio),
+ 				     "failed to get reset-gpios\n");
+ 
+-	for (i = 0; i < ARRAY_SIZE(ov02a10_supply_names); i++)
+-		ov02a10->supplies[i].supply = ov02a10_supply_names[i];
+-
+-	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ov02a10_supply_names),
+-				      ov02a10->supplies);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to get regulators\n");
++	if (ov02a10->onclite_power) {
++		ov02a10->onclite_vio = devm_regulator_get(dev, "vio");
++		if (IS_ERR(ov02a10->onclite_vio))
++			return dev_err_probe(dev, PTR_ERR(ov02a10->onclite_vio),
++					     "failed to get VIO regulator\n");
++		ov02a10->onclite_vana = devm_regulator_get(dev, "vana");
++		if (IS_ERR(ov02a10->onclite_vana))
++			return dev_err_probe(dev, PTR_ERR(ov02a10->onclite_vana),
++					     "failed to get VANA regulator\n");
++		ov02a10->onclite_pinctrl = devm_pinctrl_get(dev);
++		if (IS_ERR(ov02a10->onclite_pinctrl))
++			return PTR_ERR(ov02a10->onclite_pinctrl);
++		ov02a10->onclite_active =
++			pinctrl_lookup_state(ov02a10->onclite_pinctrl, "active");
++		if (IS_ERR(ov02a10->onclite_active))
++			return PTR_ERR(ov02a10->onclite_active);
++		ov02a10->onclite_idle =
++			pinctrl_lookup_state(ov02a10->onclite_pinctrl, "idle");
++		if (IS_ERR(ov02a10->onclite_idle))
++			return PTR_ERR(ov02a10->onclite_idle);
++		ret = pinctrl_select_state(ov02a10->onclite_pinctrl,
++					   ov02a10->onclite_idle);
++		if (ret)
++			return ret;
++		ov02a10->onclite_old_rate = clk_get_rate(ov02a10->eclk);
++		if (ov02a10->onclite_old_rate != 19200000 &&
++		    ov02a10->onclite_old_rate != OV02A10_ECLK_FREQ)
++			return -EINVAL;
++	} else {
++		for (i = 0; i < ARRAY_SIZE(ov02a10_supply_names); i++)
++			ov02a10->supplies[i].supply = ov02a10_supply_names[i];
++
++		ret = devm_regulator_bulk_get(dev,
++					      ARRAY_SIZE(ov02a10_supply_names),
++					      ov02a10->supplies);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     "failed to get regulators\n");
++	}
+ 
+ 	mutex_init(&ov02a10->mutex);
+ 
+@@ -981,8 +1165,15 @@ static void ov02a10_remove(struct i2c_client *client)
+ 	mutex_destroy(&ov02a10->mutex);
+ }
+ 
++static const struct ov02a10_hwcfg ov02a10_generic_hwcfg;
++
++static const struct ov02a10_hwcfg ov02a10_onclite_hwcfg = {
++	.onclite_power = true,
++};
++
+ static const struct of_device_id ov02a10_of_match[] = {
+-	{ .compatible = "ovti,ov02a10" },
++	{ .compatible = "ovti,ov02a10", .data = &ov02a10_generic_hwcfg },
++	{ .compatible = "xiaomi,onclite-ov02a10", .data = &ov02a10_onclite_hwcfg },
+ 	{}
+ };
+ MODULE_DEVICE_TABLE(of, ov02a10_of_match);
+-- 
+2.43.0
+

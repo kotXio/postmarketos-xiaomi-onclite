@@ -1,0 +1,29 @@
+From 8de69533f6d82402f2b2d8a3b967904c15c541bd Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Mon, 14 Sep 2026 09:49:04 +0300
+Subject: [PATCH] libcamera: software_isp: invalidate CPU lookup tables on
+ configure
+
+The cached gamma must differ from the default gamma=1. Otherwise the first lookup update skips uninitialized tables. Use a negative invalid value, as the existing comment requires. Native actual-class tests reproduce the failure before this one-line fix.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ src/libcamera/software_isp/debayer_cpu.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/libcamera/software_isp/debayer_cpu.cpp b/src/libcamera/software_isp/debayer_cpu.cpp
+index d9f5b32..193d599 100644
+--- a/src/libcamera/software_isp/debayer_cpu.cpp
++++ b/src/libcamera/software_isp/debayer_cpu.cpp
+@@ -595,7 +595,7 @@ int DebayerCpu::configure(const StreamConfiguration &inputCfg,
+ 	 * own parameters. Let's enforce recomputing lookup tables by setting the
+ 	 * stored last used gamma to an out-of-range value.
+ 	 */
+-	params_.gamma = 1.0;
++	params_.gamma = -1.0;
+ 
+ 	window_.x = ((inputCfg.size.width - outputCfg.size.width) / 2) &
+ 		    ~(inputConfig_.patternSize.width - 1);
+-- 
+2.43.0
+

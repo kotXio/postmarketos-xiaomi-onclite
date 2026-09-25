@@ -1,7 +1,107 @@
 # Packages and installation
 
-Compiled APKs are attached to GitHub Releases, not stored in Git. The latest
-speaker set is
+Compiled APKs are attached to GitHub Releases, not stored in Git.
+
+## Rear-camera packages
+
+The rear-camera set is
+[`v2026.09.25-cameras`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.25-cameras).
+
+| Package | Purpose |
+| --- | --- |
+| `linux-postmarketos-qcom-msm8953-7.0.9-r56.apk` | Cumulative kernel with OV12A10 and OV02A10 support. |
+| `libcamera-99990.7.1-r6.apk` | Matching libcamera core and Simple pipeline. |
+| `libcamera-ipa-99990.7.1-r6.apk` | Matching signed IPA modules. |
+| `libcamera-tools-99990.7.1-r6.apk` | `cam` and `lc-compliance` command-line tools. |
+| `libcamera-gstreamer-99990.7.1-r6.apk` | Matching GStreamer `libcamerasrc` plugin. |
+
+### Exact compatibility
+
+- Xiaomi Redmi 7 Global (`xiaomi,onclite`, `M1810F6LG`), `aarch64`;
+- postmarketOS `v26.06`, Alpine `3.24` and Linux runtime ABI
+  `7.0.9-msm8953`;
+- microSD root and `/boot`;
+- cumulative kernel r31 or the tested intermediate camera kernel r54;
+- distribution libcamera/IPA `99990.7.1-r0` as the starting userspace;
+- one `cma=128M` kernel command-line entry for full-resolution OV12A10
+  capture.
+
+The tools package requires the unmodified Alpine `gtest 1.17.0-r1` runtime.
+Install it from the matching configured postmarketOS/Alpine repository if it
+is not already present; it is not duplicated in this Release.
+
+Keep the current kernel and libcamera core/IPA APKs before upgrading, and keep
+a working recovery path. Close every camera application. Download the five
+APKs and `SHA256SUMS` into one empty directory and verify them:
+
+```sh
+sha256sum -c SHA256SUMS
+
+tr '\0' '\n' < /sys/firmware/devicetree/base/compatible |
+  grep -Fx xiaomi,onclite
+uname -m
+uname -r
+findmnt -no SOURCE /
+findmnt -no SOURCE /boot
+apk info -v linux-postmarketos-qcom-msm8953 libcamera libcamera-ipa gtest
+```
+
+Create the camera CMA setting only if the command line does not already contain
+exactly one `cma=128M` entry:
+
+```sh
+grep -o 'cma=[^ ]*' /proc/cmdline
+sudo install -d -m 0755 /etc/kernel-cmdline.d
+printf '%s\n' 'cma=128M' |
+  sudo tee /etc/kernel-cmdline.d/91-onclite-camera-cma.conf >/dev/null
+```
+
+Simulate the complete local transaction:
+
+```sh
+sudo apk add --simulate --no-network --allow-untrusted \
+  ./linux-postmarketos-qcom-msm8953-7.0.9-r56.apk \
+  ./libcamera-99990.7.1-r6.apk \
+  ./libcamera-ipa-99990.7.1-r6.apk \
+  ./libcamera-tools-99990.7.1-r6.apk \
+  ./libcamera-gstreamer-99990.7.1-r6.apk
+```
+
+Continue only if those packages change without removing or changing unrelated
+packages. Repeat without `--simulate`, synchronize storage and reboot. The
+kernel installation regenerates the initramfs and boot configuration.
+
+After reboot, verify the installed versions, CMA reservation and camera list:
+
+```sh
+apk info -v linux-postmarketos-qcom-msm8953 \
+  libcamera libcamera-ipa libcamera-tools libcamera-gstreamer
+grep -o 'cma=[^ ]*' /proc/cmdline
+grep '^CmaTotal:' /proc/meminfo
+cam -l
+```
+
+Expected native RAW modes are OV12A10 `4096x3072` and OV02A10 `1600x1200`.
+See [results and limits](../fixes/rear-cameras.md).
+
+### Roll back
+
+Restore the exact kernel and libcamera core/IPA APKs saved before installation.
+Remove `libcamera-tools` and `libcamera-gstreamer` only if they were absent
+before this update. Remove
+`/etc/kernel-cmdline.d/91-onclite-camera-cma.conf` only if it was created for
+this release, then reinstall the previous kernel so the boot configuration is
+regenerated. Simulate every package transaction first and reboot after the
+kernel rollback. Remove `gtest` only if this release introduced it and no
+remaining package depends on it.
+
+The exact source aports are retained under
+[`linux-postmarketos-qcom-msm8953-r56/`](linux-postmarketos-qcom-msm8953-r56/)
+and [`libcamera-r6/`](libcamera-r6/).
+
+## Speaker and Mic2 packages
+
+The speaker set is
 [`v2026.09.11-audio`](https://github.com/kotXio/postmarketos-xiaomi-onclite/releases/tag/v2026.09.11-audio).
 
 | Package | Purpose |

@@ -1,0 +1,31 @@
+From be8372cfe6a68f1d21c8d757eff77c1db1dd2d71 Mon Sep 17 00:00:00 2001
+From: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+Date: Sun, 13 Sep 2026 16:42:13 +0300
+Subject: [PATCH 47/49] dt-bindings: media: onclite: use scalar clock-lanes
+
+Match the current common video-interface uint32 clock-lane schema.
+
+DTS wiring, sensor code and hardware sequence stay unchanged.
+
+Signed-off-by: Kostiantyn Andriiuk <konstantin@andriyuk.com>
+---
+ .../devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml  | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml b/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml
+index 01acdfb70e644..51f870765cd18 100644
+--- a/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml
++++ b/Documentation/devicetree/bindings/media/i2c/xiaomi,onclite-ov12a10.yaml
+@@ -60,8 +60,7 @@ properties:
+               - const: 3
+               - const: 4
+           clock-lanes:
+-            items:
+-              - const: 0
++            const: 0
+           link-frequencies:
+             maxItems: 1
+         required:
+-- 
+2.43.0
+

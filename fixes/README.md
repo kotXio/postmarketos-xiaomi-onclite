@@ -9,3 +9,4 @@ known limitations for each completed improvement.
 - [AW87329 bottom speaker and default Mic2](main-speaker.md)
 - [KRecorder recording and playback buffering](krecorder.md)
 - [Angelfish rendering and WebEngine video integration](angelfish.md)
+- [OV12A10 and OV02A10 rear cameras](rear-cameras.md)

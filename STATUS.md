@@ -1,10 +1,11 @@
 # Device status
 
-Last updated: 2026-09-12
+Last updated: 2026-09-25
 
 Tested on one Xiaomi Redmi 7 (`onclite`), `aarch64`, with postmarketOS
 `v26.06`, Plasma Mobile and Linux `7.0.9-msm8953`. The current configuration
-uses persistent cumulative kernel package `7.0.9-r31`, UCM package `19-r4`,
+uses persistent cumulative kernel package `7.0.9-r56`, matching libcamera
+package set `99990.7.1-r6`, UCM package `19-r4`,
 Sensor Registry package pair `0.1_git20250706-r4`, tethering package `51-r2`
 and onclite gadget-lifecycle package `1-r0`.
 
@@ -32,7 +33,9 @@ and onclite gadget-lifecycle package `1-r0`.
 | Hardware video encoding | Unverified | The Qualcomm Venus V4L2 encoder is exposed, but actual encoding has not been tested. |
 | Battery telemetry | Working | QGauge reports presence, voltage, current, temperature, health, status, design data and approximate capacity through Linux, UPower and Plasma. |
 | Charging control | Partial | Charging state is visible and cable transitions were tested, but Linux does not configure current, voltage, JEITA, HVDCP or watchdog policy. |
-| Rear and front cameras | Not working | No camera is exposed by the current postmarketOS port. |
+| Rear main camera | Working | OV12A10 captures native RAW10 at `4096x3072` through libcamera. Production 3A and colour tuning are not included. |
+| Rear auxiliary camera | Working | OV02A10 captures native RAW10 at `1600x1200`; sequential auxiliary/main use and complete cleanup were verified. |
+| Front camera | Not working | The sensor was identified, but this release does not expose a usable front-camera image. |
 | Accelerometer and rotation | Working | LIS2HH streams through Linux IIO and SensorProxy; Plasma rotates after Auto-rotate is set to `Always`. |
 | Magnetometer | Working | AK09918 provides changing XYZ samples; application-specific compass calibration was not tested. |
 | Proximity | Working | The stk3x3x stream repeatedly reports distinct covered and open states; call-UI policy was not tested. |
@@ -42,7 +45,7 @@ and onclite gadget-lifecycle package `1-r0`.
 | Fingerprint sensor | Not working | Not exposed by the current postmarketOS port. |
 | IR transmitter | Not working | No working Linux integration is available. |
 | FM radio | Unverified | Not enabled or tested under postmarketOS. |
-| Suspend/resume | Partial | Cable-free manual `s2idle` resumes with display, touch, sensors, Wi-Fi, microSD and battery telemetry working; automatic idle suspend and sleep current remain unverified. |
+| Suspend/resume | Partial | Cable-free manual `s2idle` resumes with display, touch, sensors, Wi-Fi, microSD, battery telemetry and rear-camera capture working; automatic idle suspend and sleep current remain unverified. |
 
 ## Status vocabulary
 

@@ -1,10 +1,10 @@
 # Sources and provenance
 
 The USB OTG integration, onclite-specific QGauge follow-ups, Sensor Manager
-corrections, Sensor Registry additions and AW87329 audio support are
-project-authored for `xiaomi,onclite`. Imported work retains its original
-authorship. The sources below were used as pinned build inputs or technical
-references.
+corrections, Sensor Registry additions, AW87329 audio support and rear-camera
+board integration are project-authored for `xiaomi,onclite`. Imported work
+retains its original authorship. The sources below were used as pinned build
+inputs or technical references.
 
 ## Pinned build inputs
 
@@ -16,6 +16,16 @@ references.
   `4fbd4ef990345acae246dcfa6a54124ef4968ce8`.
 - Cumulative USB OTG, QGauge, Sensor Manager and AW87329 result tree:
   `61065c7f576be21329fa75313c31ade5b7f5b409`.
+- Cumulative USB OTG, QGauge, Sensor Manager, AW87329 and rear-camera result
+  tree: `d406fc77427fa4d49da1df5b83850206e2db59ae`; matching pmaports tree
+  `e925913ba637a6c7896faa3d5bd789b5d9d70c11`.
+- libcamera base:
+  [`v0.7.1`](https://gitlab.freedesktop.org/camera/libcamera/-/tree/v0.7.1),
+  commit `183e37362f57ff3ce7493abf0bc6f1b57b931f55`; ten-patch result tree
+  `6021c5c4596c2858f8ed357bec5d32c0d1f904c2`.
+- libcamera pmaports base: commit
+  [`2b7f90ea7c2ae4d42ae187dc0b528dc163767b04`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/2b7f90ea7c2ae4d42ae187dc0b528dc163767b04/temp/libcamera).
+  The exact tested r6 recipe and patches are retained in this repository.
 - ALSA UCM base:
   [`msm8953-mainline/alsa-ucm-conf`](https://github.com/msm8953-mainline/alsa-ucm-conf/tree/ed9334bda853fe032794751c34cea03ec0d7d4eb),
   commit `ed9334bda853fe032794751c34cea03ec0d7d4eb`.
@@ -29,7 +39,8 @@ references.
   [`6aa48aa00aa3b745f26996b45aaf768532ae7b24`](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/6aa48aa00aa3b745f26996b45aaf768532ae7b24);
   final review-series tree `81a222e41fad76df7557f9f895d1842f2f5f3d81`.
 
-The r31, r28, r25 and r16 release aports are retained under
+The r56, r31, r28, r25 and r16 release aports are retained under
+[`packages/linux-postmarketos-qcom-msm8953-r56/`](packages/linux-postmarketos-qcom-msm8953-r56/),
 [`packages/linux-postmarketos-qcom-msm8953-r31/`](packages/linux-postmarketos-qcom-msm8953-r31/),
 [`packages/linux-postmarketos-qcom-msm8953-r28/`](packages/linux-postmarketos-qcom-msm8953-r28/),
 [`packages/linux-postmarketos-qcom-msm8953-r25/`](packages/linux-postmarketos-qcom-msm8953-r25/)
@@ -39,6 +50,8 @@ The exact `sns-reg r4` aport is retained under
 [`packages/sns-reg-r4/`](packages/sns-reg-r4/).
 The UCM r4 aport is retained under
 [`packages/soc-qcom-msm8953-ucm-r4/`](packages/soc-qcom-msm8953-ucm-r4/).
+The matching libcamera aport is retained under
+[`packages/libcamera-r6/`](packages/libcamera-r6/).
 
 ## Kernel and hardware references
 
@@ -148,6 +161,38 @@ a new small ASoC implementation with strict profile validation and
 fail-closed reset handling. The proprietary `aw87329_kspk.bin` remains on its
 own phone and is not distributed.
 
+## Rear cameras
+
+- OV12A10 support is project-authored by Kostiantyn Andriiuk. Its fixed-mode
+  sensor implementation was adapted from this project's public Redmi 5 Plus
+  [OV12A10 driver patch](https://github.com/kotXio/postmarketos-xiaomi-vince/blob/main/patches/kernel/0008-ov12a10-driver-v1.patch),
+  then changed for onclite power, clocks and media wiring. No proprietary
+  camera library or register blob is distributed.
+- The public LineageOS
+  [onclite camera board description](https://github.com/LineageOS/android_kernel_xiaomi_onclite/blob/8aab452e4acd7cb9bcbd173a3db0fec443b35521/arch/arm64/boot/dts/qcom/msm8953-camera-sensor-mtp.dtsi)
+  was used to cross-check board resources. Handset-local stock descriptors
+  were used only to verify scalar mode and power facts and are not included.
+- OV02A10 starts from Linux's existing
+  [sensor driver](https://github.com/torvalds/linux/blob/5225b8eec4c9bb21aecff6295fab6346a3c3738e/drivers/media/i2c/ov02a10.c)
+  and
+  [DT binding](https://github.com/torvalds/linux/blob/5225b8eec4c9bb21aecff6295fab6346a3c3738e/Documentation/devicetree/bindings/media/i2c/ovti,ov02a10.yaml).
+  The onclite compatible, power sequence and DTS wiring are by Kostiantyn
+  Andriiuk; generic OV02A10 behaviour and upstream authorship remain intact.
+- libcamera patches `0001..0003` come from the public postmarketOS
+  [libcamera aport](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/2b7f90ea7c2ae4d42ae187dc0b528dc163767b04/temp/libcamera)
+  and retain Robert Mader's authorship. The imported vector helper and CPU
+  black-level fix retain the authors and review trail from libcamera
+  [Patchwork 26998](https://patchwork.libcamera.org/patch/26998/) and
+  [Patchwork 27001](https://patchwork.libcamera.org/patch/27001/).
+- The onclite gain helper, CPU lookup initialization, bounded request-stop
+  handling and opt-in CPU `udmabuf` selection are by Kostiantyn Andriiuk. The
+  request-stop work was informed by libcamera's public
+  [software-ISP cleanup discussion](https://patchwork.libcamera.org/patch/21719/),
+  but the published patch is the independently adapted onclite-tested change.
+
+The Release contains no camera firmware, EEPROM or OTP data, calibration,
+stock binaries, photographs or recordings.
+
 ## Qt applications
 
 The Angelfish configuration transfers the same Qt WebEngine r10 binary used
@@ -187,6 +232,16 @@ not a playback-code patch.
 
 ## Public verification identifiers
 
+- cumulative r56 kernel APK SHA-256:
+  `d27f015adfbb01f6a1c21476bb0cf5cc7c6214a35bdf9de970086b6be8ffb96a`;
+- libcamera r6 APK SHA-256:
+  `916098084d7f7ea18d9cac7f24adf32d6c6fbd4f6b3d7c8cd46c87f1748dd5b7`;
+- libcamera IPA r6 APK SHA-256:
+  `717fe0aefc4074156eaabab2416a5ffc82b3f0a75637a597d7a2fc8314606872`;
+- libcamera tools r6 APK SHA-256:
+  `5e60e3cdf7a38f57c87fe33d20967378775e99b0ce117735c13016c28173a4a2`;
+- libcamera GStreamer r6 APK SHA-256:
+  `0964ba45fa8085adcf8933b438bcc587389209e75bb7807053ee6254896065f7`;
 - cumulative r31 kernel APK SHA-256:
   `98ab1af8e97529de56398b531a0831a04b4973a10b2209aa4d5eda1ffbf7d14f`;
 - UCM r4 APK SHA-256:
